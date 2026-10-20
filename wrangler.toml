@@ -7,5 +7,5 @@ binding = "DB"
 database_name = "sync-zone"
 # Replace with the id printed by `npx wrangler d1 create sync-zone` before deploying.
 # Local dev works with the placeholder.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "8c520fcd-7765-4875-8927-8ee501a1d453"
 migrations_dir = "migrations"

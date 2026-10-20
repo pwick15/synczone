@@ -18,22 +18,22 @@ CREATE TABLE meetings (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
-  -- Window covered by the grid, as UTC epoch milliseconds [start_utc, end_utc).
+  /* Window covered by the grid, as UTC epoch milliseconds [start_utc, end_utc). */
   start_utc INTEGER NOT NULL,
   end_utc INTEGER NOT NULL,
   slot_minutes INTEGER NOT NULL,
-  -- The time zone the creator picked the dates in, kept for display.
+  /* The time zone the creator picked the dates in, kept for display. */
   tz TEXT NOT NULL,
   created_by TEXT,
-  -- Optional locked-in time, as UTC epoch milliseconds.
+  /* Optional locked-in time, as UTC epoch milliseconds. */
   chosen_start INTEGER,
   chosen_end INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX meetings_session ON meetings(session_id);
 
--- One row per person per meeting. `slots` is a JSON array of slot indexes,
--- where index i starts at start_utc + i * slot_minutes.
+/* One row per person per meeting. `slots` is a JSON array of slot indexes,
+   where index i starts at start_utc + i * slot_minutes. */
 CREATE TABLE availability (
   meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
