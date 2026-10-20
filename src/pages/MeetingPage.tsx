@@ -4,9 +4,21 @@ import { api, ApiError } from "../api";
 import { Grid } from "../components/Grid";
 import { Avatar, JoinDialog, TzDriftNotice } from "../components/People";
 import { Link, navigate } from "../router";
-import { buildGrid, icsFor, NIGHT_END, slotCount, slotMs, slotStart, suggest, zonedSlots, type Suggestion } from "../schedule";
+import {
+  buildGrid,
+  icsFor,
+  NIGHT_END,
+  othersOverlap,
+  slotCount,
+  slotMs,
+  slotStart,
+  suggest,
+  zonedSlots,
+  type Shade,
+  type Suggestion,
+} from "../schedule";
 import { getPref, rememberSession, setPref } from "../storage";
-import { browserTz, fmtDay, fmtDuration, fmtRange, fmtTime, tzCity, tzLabel, tzOffset } from "../time";
+import { browserTz, fmtDay, fmtDuration, fmtRange, fmtTime, tzCity, tzOffset } from "../time";
 import { useMe } from "../useMe";
 import { usePoll } from "../usePoll";
 import { CopyLink, Loading, NotFound } from "./SessionPage";
@@ -70,9 +82,9 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
 
   const [viewTz, setViewTz] = useState<string | null>(null);
   const [showNight, setShowNight] = useState(() => getPref("showNight", false));
-  const [panel, setPanel] = useState<"mine" | "group">("mine");
-  const [inspect, setInspect] = useState<number | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
   const [lengthMin, setLengthMin] = useState(60);
+  const [bufferPref, setBufferPref] = useState(() => getPref("buffer", 30));
 
   const meeting = payload?.meeting;
   const tz = viewTz ?? me?.tz ?? browserTz();
@@ -100,8 +112,11 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
   const waiting = participants.filter((p) => !(p.id in availability));
 
   const n = slotCount(meeting);
-  const counts = new Array<number>(n).fill(0);
-  for (const p of respondents) for (const i of availability[p.id]) counts[i]++;
+
+  const bufferOptions = [0, 15, 30, 45, 60].filter((m) => m % meeting.slotMinutes === 0);
+  const buffer = bufferOptions.includes(bufferPref) ? bufferPref : (bufferOptions.find((m) => m >= bufferPref) ?? 0);
+  const others = respondents.filter((p) => p.id !== me?.id);
+  const shade = othersOverlap(meeting, others, availability, buffer);
 
   const lengthOptions = [15, 30, 45, 60, 90, 120, 180].filter((m) => m % meeting.slotMinutes === 0);
   const length = lengthOptions.includes(lengthMin) ? lengthMin : (lengthOptions.find((m) => m >= lengthMin) ?? meeting.slotMinutes);
@@ -200,28 +215,59 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
           />
           Show midnight–6 AM
         </label>
-        <div className="segmented tabs" role="tablist" aria-label="Grid">
-          <button role="tab" aria-selected={panel === "mine"} className={panel === "mine" ? "on" : ""} onClick={() => setPanel("mine")}>
-            Mine
-          </button>
-          <button role="tab" aria-selected={panel === "group"} className={panel === "group" ? "on" : ""} onClick={() => setPanel("group")}>
-            Everyone
-          </button>
-        </div>
       </div>
 
-      <div className="grids">
-        <section className={`card grid-card${panel === "mine" ? "" : " tab-hidden"}`}>
+      <div className="meeting-layout">
+        <section className="card grid-card">
           <div className="grid-head">
             <h2>Your availability</h2>
             <SaveStatus state={save} />
           </div>
-          <p className="muted small">
-            Drag across the times you're free. Drag over marked times to clear them. Times are {tzLabel(tz)}.
-          </p>
+          <p className="muted small">Drag across the times you're free. Drag over them again to clear.</p>
+          <Readout
+            meeting={meeting}
+            slot={hover}
+            tz={tz}
+            shade={shade}
+            respondents={respondents}
+            availability={availability}
+            me={me}
+          />
+          <div className="legend">
+            <span className="swatch-item">
+              <span className="swatch swatch-mine" /> You're free
+            </span>
+            <span className="swatch-item">
+              <span className="swatch swatch-overlap" /> {shade.together === shade.others.length ? "Works for everyone else" : `Best overlap (${shade.together} of ${shade.others.length})`}
+            </span>
+            <label className="swatch-item">
+              <span className="swatch swatch-buffer" /> Buffer
+              <select
+                value={buffer}
+                onChange={(e) => {
+                  setBufferPref(Number(e.target.value));
+                  setPref("buffer", Number(e.target.value));
+                }}
+                aria-label="Buffer around the overlap"
+              >
+                {bufferOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m ? `±${m} min` : "None"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {me && mine ? (
             <>
-              <Grid mode="edit" model={grid} selected={mine} onChange={editMine} chosen={chosenSlots} />
+              <Grid
+                model={grid}
+                selected={mine}
+                onChange={editMine}
+                shade={shade.levels}
+                chosen={chosenSlots}
+                onHover={setHover}
+              />
               {mine.size === 0 && !(me.id in payload.availability) && (
                 <button className="ghost small" onClick={() => editMine(new Set())}>
                   None of these times work for me
@@ -233,74 +279,44 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
           )}
         </section>
 
-        <section className={`card grid-card${panel === "group" ? "" : " tab-hidden"}`}>
+        <section className="card best">
           <div className="grid-head">
-            <h2>Everyone</h2>
-            <Legend total={respondents.length} />
+            <h2>Best times</h2>
+            <label className="inline">
+              Length
+              <select value={length} onChange={(e) => setLengthMin(Number(e.target.value))}>
+                {lengthOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {fmtDuration(m)}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
-          <SlotDetail
-            meeting={meeting}
-            slot={inspect}
-            tz={tz}
-            respondents={respondents}
-            availability={availability}
-            waiting={waiting}
-            length={length}
-            onLockIn={lockIn}
-          />
-          <Grid
-            mode="group"
-            model={grid}
-            counts={counts}
-            total={respondents.length}
-            onInspect={(s) => s !== null && setInspect(s)}
-            active={inspect}
-            chosen={chosenSlots}
-          />
+          {respondents.length === 0 ? (
+            <p className="muted">Suggestions appear once people mark their availability.</p>
+          ) : suggestions.length === 0 ? (
+            <p className="muted">No {fmtDuration(length)} stretch works for anyone yet. Try a shorter meeting.</p>
+          ) : (
+            <ol className="suggestions">
+              {suggestions.map((s) => (
+                <SuggestionRow
+                  key={`${s.start}-${s.end}`}
+                  s={s}
+                  meeting={meeting}
+                  tz={tz}
+                  zones={zones}
+                  participants={participants}
+                  respondents={respondents}
+                  waiting={waiting}
+                  length={length}
+                  onLockIn={() => lockIn(s.start)}
+                />
+              ))}
+            </ol>
+          )}
         </section>
       </div>
-
-      <section className="card best">
-        <div className="grid-head">
-          <h2>Best times</h2>
-          <label className="inline">
-            Meeting length
-            <select value={length} onChange={(e) => setLengthMin(Number(e.target.value))}>
-              {lengthOptions.map((m) => (
-                <option key={m} value={m}>
-                  {fmtDuration(m)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {respondents.length === 0 ? (
-          <p className="muted">Suggestions appear once people mark their availability.</p>
-        ) : suggestions.length === 0 ? (
-          <p className="muted">No {fmtDuration(length)} stretch works for anyone yet. Try a shorter meeting.</p>
-        ) : (
-          <ol className="suggestions">
-            {suggestions.map((s) => (
-              <SuggestionRow
-                key={`${s.start}-${s.end}`}
-                s={s}
-                meeting={meeting}
-                tz={tz}
-                zones={zones}
-                participants={participants}
-                respondents={respondents}
-                waiting={waiting}
-                length={length}
-                onShow={() => {
-                  setInspect(s.start);
-                  setPanel("group");
-                }}
-                onLockIn={() => lockIn(s.start)}
-              />
-            ))}
-          </ol>
-        )}
-      </section>
 
       <footer className="danger-zone">
         <button className="ghost danger small" onClick={remove}>
@@ -320,53 +336,59 @@ function SaveStatus({ state }: { state: SaveState }) {
   return <span className={`save save-${state}`}>{text}</span>;
 }
 
-function Legend({ total }: { total: number }) {
-  if (total === 0) return null;
-  return (
-    <span className="legend">
-      <span>0/{total}</span>
-      <span className="legend-bar" />
-      <span>{total}/{total}</span>
-    </span>
-  );
-}
+const names = (people: Participant[]) =>
+  people.length <= 1
+    ? (people[0]?.initials ?? "")
+    : `${people.slice(0, -1).map((p) => p.initials).join(", ")} and ${people[people.length - 1].initials}`;
 
-function SlotDetail(props: {
+/** Who's free under the pointer, or what the shading means when nothing is hovered. */
+function Readout(props: {
   meeting: Meeting;
   slot: number | null;
   tz: string;
+  shade: Shade;
   respondents: Participant[];
   availability: Record<string, number[]>;
-  waiting: Participant[];
-  length: number;
-  onLockIn: (slot: number) => void;
+  me: Participant | null;
 }) {
-  const { meeting, slot, tz, respondents, availability, waiting } = props;
-  if (slot === null) {
-    return <p className="slot-detail muted small">Hover or tap a time to see who's free.</p>;
-  }
-  const start = slotStart(meeting, slot);
-  const free = respondents.filter((p) => availability[p.id].includes(slot));
-  const busy = respondents.filter((p) => !availability[p.id].includes(slot));
-  return (
-    <div className="slot-detail">
-      <strong>{fmtRange(start, start + slotMs(meeting), tz)}</strong>
-      <div className="who">
-        {free.length > 0 && (
-          <span>
-            Free {free.map((p) => <Avatar key={p.id} p={p} size="sm" />)}
-          </span>
-        )}
-        {busy.length > 0 && (
-          <span>
-            Busy {busy.map((p) => <Avatar key={p.id} p={p} size="sm" dim />)}
-          </span>
-        )}
-        {waiting.length > 0 && <span className="muted">· {waiting.length} not answered</span>}
+  const { meeting, slot, tz, shade, respondents, availability, me } = props;
+  if (slot !== null) {
+    const start = slotStart(meeting, slot);
+    const free = respondents.filter((p) => availability[p.id].includes(slot));
+    const busy = respondents.filter((p) => !availability[p.id].includes(slot));
+    return (
+      <div className="readout">
+        <strong>{fmtRange(start, start + slotMs(meeting), tz)}</strong>
+        <span className="who">
+          {free.length > 0 && <span>Free {free.map((p) => <Avatar key={p.id} p={p} size="sm" />)}</span>}
+          {busy.length > 0 && <span>Busy {busy.map((p) => <Avatar key={p.id} p={p} size="sm" dim />)}</span>}
+          {respondents.length === 0 && <span className="muted">Nobody has answered yet</span>}
+        </span>
       </div>
-      <button className="secondary small" onClick={() => props.onLockIn(slot)}>
-        Lock in {fmtDuration(props.length)} from here
-      </button>
+    );
+  }
+
+  const { others, together } = shade;
+  let text: string;
+  if (others.length === 0) {
+    text = me
+      ? "You're the first to fill this in. Shading appears here as teammates add their times."
+      : "Join to add your times.";
+  } else if (together === others.length) {
+    text =
+      others.length === 1
+        ? `Shaded: when ${names(others)} is free. Paint over it if you can make it.`
+        : `Shaded: when ${names(others)} are all free. Paint over it if you can make it.`;
+  } else if (others.length === 1) {
+    text = `${names(others)} isn't free at any of these times.`;
+  } else if (together >= 2) {
+    text = `No time works for all of ${names(others)} yet. Shaded where ${together} of them overlap.`;
+  } else {
+    text = `${names(others)} don't overlap anywhere yet. Mark everything you can do.`;
+  }
+  return (
+    <div className="readout">
+      <span className="muted">{text}</span>
     </div>
   );
 }
@@ -413,7 +435,6 @@ function SuggestionRow(props: {
   respondents: Participant[];
   waiting: Participant[];
   length: number;
-  onShow: () => void;
   onLockIn: () => void;
 }) {
   const { s, meeting, tz, zones, participants, respondents, waiting } = props;
@@ -425,9 +446,7 @@ function SuggestionRow(props: {
   return (
     <li className={`suggestion${everyone ? " everyone" : ""}`}>
       <div className="suggestion-main">
-        <button className="link suggestion-time" onClick={props.onShow}>
-          {fmtRange(start, end, tz)}
-        </button>
+        <span className="suggestion-time">{fmtRange(start, end, tz)}</span>
         <span className={`badge${everyone ? " ok" : ""}`}>
           {everyone ? (waiting.length ? "Everyone who answered" : "Everyone") : `${s.free.length} of ${respondents.length}`}
         </span>

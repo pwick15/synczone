@@ -46,6 +46,51 @@ export function buildGrid(slots: ZonedSlot[], hideNight: boolean): GridModel {
   };
 }
 
+/** Per-slot background for the grid: 0 nothing, 1 buffer around the overlap, 2 the overlap itself. */
+export type ShadeLevels = Uint8Array;
+
+export interface Shade {
+  levels: ShadeLevels;
+  /** Everyone except the viewer who has answered. */
+  others: Participant[];
+  /** How many of `others` are free in the shaded overlap. Equals others.length for a true intersection. */
+  together: number;
+}
+
+/**
+ * Where the people other than the viewer overlap, padded by `bufferMinutes` on each side.
+ * Uses the strict intersection when there is one; otherwise falls back to the slots where the
+ * most of them overlap (at least two), so the viewer still gets a target to aim for.
+ */
+export function othersOverlap(
+  meeting: Meeting,
+  others: Participant[],
+  availability: Record<string, number[]>,
+  bufferMinutes: number,
+): Shade {
+  const n = slotCount(meeting);
+  const levels = new Uint8Array(n);
+  if (!others.length) return { levels, others, together: 0 };
+
+  const counts = new Uint16Array(n);
+  for (const p of others) for (const i of availability[p.id] ?? []) if (i < n) counts[i]++;
+  let together = others.length;
+  if (!counts.includes(together)) {
+    together = Math.max(0, ...counts);
+    if (together < 2) return { levels, others, together };
+  }
+
+  for (let i = 0; i < n; i++) if (counts[i] === together) levels[i] = 2;
+  const pad = Math.ceil(bufferMinutes / meeting.slotMinutes);
+  if (pad > 0) {
+    for (let i = 0; i < n; i++) {
+      if (levels[i] !== 2) continue;
+      for (let j = Math.max(0, i - pad); j <= Math.min(n - 1, i + pad); j++) if (!levels[j]) levels[j] = 1;
+    }
+  }
+  return { levels, others, together };
+}
+
 export interface Suggestion {
   /** Slot index where the shared free span begins. */
   start: number;

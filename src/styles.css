@@ -11,7 +11,6 @@
   --accent-soft: #e6edfc;
   --on-accent: #ffffff;
   --mine: #1f8a5c;
-  --heat: #2a5bd7;
   --cell: #f1f0eb;
   --cell-off: #e7e6e0;
   --ok: #1f7a50;
@@ -19,6 +18,8 @@
   --danger: #b93a3a;
   --warn-soft: #fdf3dc;
   --chosen: #d97a00;
+  --overlap: #b9c8ee;
+  --buffer: #d8e0f3;
   --radius: 12px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
 
@@ -48,7 +49,6 @@
     --accent-soft: #1f2a44;
     --on-accent: #0d1424;
     --mine: #3fbf86;
-    --heat: #6f98ff;
     --cell: #262624;
     --cell-off: #1a1a19;
     --ok: #5fcf97;
@@ -56,6 +56,8 @@
     --danger: #f07c7c;
     --warn-soft: #3a3020;
     --chosen: #ffa940;
+    --overlap: #3f548c;
+    --buffer: #2a3046;
     --shadow: none;
     color-scheme: dark;
   }
@@ -74,7 +76,6 @@
   --accent-soft: #1f2a44;
   --on-accent: #0d1424;
   --mine: #3fbf86;
-  --heat: #6f98ff;
   --cell: #262624;
   --cell-off: #1a1a19;
   --ok: #5fcf97;
@@ -82,6 +83,8 @@
   --danger: #f07c7c;
   --warn-soft: #3a3020;
   --chosen: #ffa940;
+  --overlap: #3f548c;
+  --buffer: #2a3046;
   --shadow: none;
   color-scheme: dark;
 }
@@ -657,16 +660,17 @@ label.inline select {
   gap: 12px 20px;
   font-size: 0.9rem;
 }
-.toolbar .tabs {
-  display: none;
-  margin-left: auto;
-}
-
-.grids {
+.meeting-layout {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) 380px;
   gap: 20px;
   align-items: start;
+}
+.best {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 .grid-head {
   display: flex;
@@ -677,21 +681,19 @@ label.inline select {
   margin-bottom: 6px;
 }
 .grid-card > .muted.small {
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
 .grid-card > button.ghost {
   margin-top: 10px;
 }
 
-@media (max-width: 900px) {
-  .grids {
+@media (max-width: 1000px) {
+  .meeting-layout {
     grid-template-columns: minmax(0, 1fr);
   }
-  .toolbar .tabs {
-    display: inline-flex;
-  }
-  .tab-hidden {
-    display: none;
+  .best {
+    position: static;
+    max-height: none;
   }
 }
 
@@ -707,32 +709,55 @@ label.inline select {
 }
 
 .legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.swatch-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.75rem;
-  color: var(--muted);
+  margin: 0;
+  font-weight: 500;
+  font-size: inherit;
 }
-.legend-bar {
-  width: 72px;
-  height: 10px;
+.swatch-item select {
+  padding: 2px 6px;
+  font-size: 0.8rem;
+}
+.swatch {
+  width: 14px;
+  height: 14px;
   border-radius: 3px;
-  background: linear-gradient(to right, var(--cell), var(--heat));
+  flex: none;
+}
+.swatch-mine {
+  background: linear-gradient(to right, var(--cell) 0 3px, var(--mine) 3px 11px, var(--cell) 11px);
+}
+.swatch-overlap {
+  background: var(--overlap);
+}
+.swatch-buffer {
+  background: var(--buffer);
 }
 
-.slot-detail {
-  /* Stays in view while scrolling a tall grid, so tapping a low row still shows who's free. */
+.readout {
+  /* Stays in view while scrolling a tall grid, so touching a low row still shows who's free. */
   position: sticky;
   top: 0;
   z-index: 2;
   background: var(--surface);
   padding: 8px 0;
-  min-height: 64px;
+  min-height: 44px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-bottom: 4px;
   font-size: 0.9rem;
 }
 .who {
@@ -766,13 +791,8 @@ label.inline select {
   user-select: none;
   -webkit-user-select: none;
   min-width: min-content;
-}
-.grid-edit {
   touch-action: none;
   cursor: crosshair;
-}
-.grid-group {
-  cursor: default;
 }
 
 .grid-day {
@@ -816,23 +836,27 @@ label.inline select {
 .cell.off {
   background: repeating-linear-gradient(-45deg, var(--cell-off) 0 3px, transparent 3px 7px);
 }
-.cell.on {
-  background: var(--mine);
+.cell.buffer {
+  background: var(--buffer);
 }
-.cell.heat {
-  background: color-mix(in oklab, var(--heat) var(--level), var(--cell));
+.cell.overlap {
+  background: var(--overlap);
 }
-.cell.full {
-  background: var(--heat);
-}
-/* Soften the grid lines inside filled runs so blocks read as one shape. */
-.cell.on,
-.cell.heat {
+.cell.buffer,
+.cell.overlap {
   border-top-color: transparent;
 }
-.cell.on.hour,
-.cell.heat.hour {
+.cell.buffer.hour,
+.cell.overlap.hour {
   border-top-color: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+/* Your selection is an inset bar so the shading behind it stays visible at the edges. */
+.cell.on::before {
+  content: "";
+  position: absolute;
+  inset: -1px max(6px, 14%) 0;
+  background: var(--mine);
+  pointer-events: none;
 }
 .cell.locked::after {
   content: "";
@@ -841,12 +865,7 @@ label.inline select {
   box-shadow: inset 3px 0 0 var(--chosen), inset -3px 0 0 var(--chosen);
   pointer-events: none;
 }
-.cell.active {
-  outline: 2px solid var(--text);
-  outline-offset: -1px;
-  z-index: 1;
-}
-.grid-edit .cell:not(.off):hover {
+.cell:not(.off):hover {
   filter: brightness(0.93);
 }
 
@@ -860,7 +879,7 @@ label.inline select {
   padding: 0;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
 .suggestion {
@@ -883,9 +902,7 @@ label.inline select {
 }
 .suggestion-time {
   font-size: 1rem;
-  font-weight: 650 !important;
-  color: var(--text) !important;
-  text-align: left;
+  font-weight: 650;
 }
 
 .zones {

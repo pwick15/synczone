@@ -1,5 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import type { GridModel } from "../schedule";
+import type { GridModel, ShadeLevels } from "../schedule";
 import { fmtDateKey, fmtMinute } from "../time";
 
 interface Rect {
@@ -9,16 +9,17 @@ interface Rect {
   r1: number;
 }
 
-type Props = {
+interface Props {
   model: GridModel;
+  selected: Set<number>;
+  onChange: (next: Set<number>) => void;
+  /** Background showing where everyone else overlaps. */
+  shade: ShadeLevels;
   /** Slot range [start, end) to outline as the locked-in time. */
   chosen: [number, number] | null;
-  /** Slot to outline as the one being inspected. */
-  active?: number | null;
-} & (
-  | { mode: "edit"; selected: Set<number>; onChange: (next: Set<number>) => void }
-  | { mode: "group"; counts: number[]; total: number; onInspect: (slot: number | null) => void }
-);
+  /** The slot under the pointer (or last touched), for the who's-free readout. */
+  onHover: (slot: number | null) => void;
+}
 
 const cellAt = (x: number, y: number) => {
   const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-di]");
@@ -32,50 +33,41 @@ const toRect = (a: number[], b: number[]): Rect => ({
   r1: Math.max(a[1], b[1]),
 });
 
+const sameRect = (a: Rect, b: Rect) => a.d0 === b.d0 && a.d1 === b.d1 && a.r0 === b.r0 && a.r1 === b.r1;
+
 const inRect = (r: Rect | null, di: number, ri: number) =>
   !!r && di >= r.d0 && di <= r.d1 && ri >= r.r0 && ri <= r.r1;
 
-export function Grid(props: Props) {
-  const { model, chosen, active } = props;
+const SHADE_CLASS = ["", " buffer", " overlap"];
+
+export function Grid({ model, selected, onChange, shade, chosen, onHover }: Props) {
   const drag = useRef<{ anchor: number[]; adding: boolean } | null>(null);
   const [preview, setPreview] = useState<{ rect: Rect; adding: boolean } | null>(null);
 
-  const isSelected = (slot: number) => props.mode === "edit" && props.selected.has(slot);
-
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     const pos = cellAt(e.clientX, e.clientY);
-    if (!pos) return;
-    if (props.mode === "group") {
-      props.onInspect(model.at(pos[0], pos[1]) ?? null);
-      return;
-    }
-    if (e.button !== 0) return;
+    if (!pos || e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     const slot = model.at(pos[0], pos[1]);
-    const adding = slot === undefined || !isSelected(slot);
+    onHover(slot ?? null);
+    const adding = slot === undefined || !selected.has(slot);
     drag.current = { anchor: pos, adding };
     setPreview({ rect: toRect(pos, pos), adding });
   };
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     const pos = cellAt(e.clientX, e.clientY);
-    if (props.mode === "group") {
-      if (e.pointerType === "mouse") props.onInspect(pos ? (model.at(pos[0], pos[1]) ?? null) : null);
-      return;
-    }
+    if (e.pointerType === "mouse" || drag.current) onHover(pos ? (model.at(pos[0], pos[1]) ?? null) : null);
     if (!drag.current || !pos) return;
     const rect = toRect(drag.current.anchor, pos);
-    setPreview((p) =>
-      p && p.rect.d0 === rect.d0 && p.rect.d1 === rect.d1 && p.rect.r0 === rect.r0 && p.rect.r1 === rect.r1
-        ? p
-        : { rect, adding: drag.current!.adding },
-    );
+    const adding = drag.current.adding;
+    setPreview((p) => (p && sameRect(p.rect, rect) ? p : { rect, adding }));
   };
 
   const finish = () => {
-    if (props.mode !== "edit" || !drag.current || !preview) return;
-    const next = new Set(props.selected);
+    if (!drag.current || !preview) return;
+    const next = new Set(selected);
     for (let di = preview.rect.d0; di <= preview.rect.d1; di++) {
       for (let ri = preview.rect.r0; ri <= preview.rect.r1; ri++) {
         const slot = model.at(di, ri);
@@ -86,7 +78,7 @@ export function Grid(props: Props) {
     }
     drag.current = null;
     setPreview(null);
-    props.onChange(next);
+    onChange(next);
   };
 
   const cancel = () => {
@@ -99,17 +91,17 @@ export function Grid(props: Props) {
   return (
     <div className="grid-scroll">
       <div
-        className={`grid grid-${props.mode}`}
+        className="grid"
         style={style}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={finish}
         onPointerCancel={cancel}
-        onPointerLeave={() => props.mode === "group" && props.onInspect(null)}
+        onPointerLeave={(e) => e.pointerType === "mouse" && !drag.current && onHover(null)}
         role="grid"
-        aria-label={props.mode === "edit" ? "Your availability" : "Everyone's availability"}
+        aria-label="Your availability"
       >
-        <div className="grid-corner" />
+        <div />
         {model.dates.map((d) => {
           const { weekday, date } = fmtDateKey(d);
           return (
@@ -124,24 +116,12 @@ export function Grid(props: Props) {
             {model.dates.map((d, di) => {
               const slot = model.at(di, ri);
               if (slot === undefined) return <div key={d} className="cell off" data-di={di} data-ri={ri} />;
-              let cls = "cell";
-              let cellStyle: CSSProperties | undefined;
-              if (props.mode === "edit") {
-                const on = inRect(preview?.rect ?? null, di, ri) ? preview!.adding : isSelected(slot);
-                if (on) cls += " on";
-              } else {
-                const c = props.counts[slot] ?? 0;
-                if (c > 0) {
-                  cls += " heat";
-                  if (c === props.total && props.total > 1) cls += " full";
-                  // Starts at 25% so a single free person is still clearly visible.
-                  cellStyle = { "--level": `${Math.round(25 + (c / Math.max(props.total, 1)) * 75)}%` } as CSSProperties;
-                }
-              }
+              const on = inRect(preview?.rect ?? null, di, ri) ? preview!.adding : selected.has(slot);
+              let cls = "cell" + SHADE_CLASS[shade[slot]];
+              if (on) cls += " on";
               if (chosen && slot >= chosen[0] && slot < chosen[1]) cls += " locked";
-              if (active === slot) cls += " active";
               if (minute % 60 === 0) cls += " hour";
-              return <div key={d} className={cls} style={cellStyle} data-di={di} data-ri={ri} />;
+              return <div key={d} className={cls} data-di={di} data-ri={ri} />;
             })}
           </Row>
         ))}
