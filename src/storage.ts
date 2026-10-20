@@ -1,26 +1,33 @@
 // Per-browser conveniences. Everything here is optional: the app works if storage is blocked.
 
-function read<T>(key: string, fallback: T): T {
+function read<T>(key: string, fallback: T, store: () => Storage = () => localStorage): T {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = store().getItem(key);
     return raw === null ? fallback : (JSON.parse(raw) as T);
   } catch {
     return fallback;
   }
 }
 
-function write(key: string, value: unknown) {
+function write(key: string, value: unknown, store: () => Storage = () => localStorage) {
   try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(value));
+    if (value === null) store().removeItem(key);
+    else store().setItem(key, JSON.stringify(value));
   } catch {
     // Private mode or blocked storage; the user just rejoins next time.
   }
 }
 
-/** Which participant this browser is, per session. */
-export const getMe = (sid: string) => read<string | null>(`sz:me:${sid}`, null);
-export const setMe = (sid: string, pid: string | null) => write(`sz:me:${sid}`, pid);
+/**
+ * Who you are in this tab, per session. Kept in sessionStorage so every new tab
+ * (incognito or not) asks again, which makes switching between friends easy.
+ */
+export const getMe = (sid: string) => read<string | null>(`sz:me:${sid}`, null, () => sessionStorage);
+export const setMe = (sid: string, pid: string | null) => write(`sz:me:${sid}`, pid, () => sessionStorage);
+
+/** Who this browser picked last time, to highlight in the picker. */
+export const getLastMe = (sid: string) => read<string | null>(`sz:last:${sid}`, null);
+export const setLastMe = (sid: string, pid: string) => write(`sz:last:${sid}`, pid);
 
 export interface RecentSession {
   id: string;

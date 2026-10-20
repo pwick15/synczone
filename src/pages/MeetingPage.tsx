@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Meeting, Participant } from "../../shared/types";
 import { api, ApiError } from "../api";
 import { Grid } from "../components/Grid";
-import { Avatar, JoinDialog, TzDriftNotice } from "../components/People";
+import { Avatar, PersonPicker, WhoAmI } from "../components/People";
 import { Link, navigate } from "../router";
 import {
   buildGrid,
@@ -17,7 +17,7 @@ import {
   type Shade,
   type Suggestion,
 } from "../schedule";
-import { getPref, rememberSession, setPref } from "../storage";
+import { getLastMe, getPref, rememberSession, setPref } from "../storage";
 import { browserTz, fmtDay, fmtDuration, fmtRange, fmtTime, tzCity, tzOffset } from "../time";
 import { useMe } from "../useMe";
 import { usePoll } from "../usePoll";
@@ -36,7 +36,8 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
   }, [sid, mid]);
   const { data, setData, error } = usePoll(load, 10_000, [sid, mid]);
   const payload = data?.payload;
-  const { me, setMeId } = useMe(sid, payload?.participants);
+  const { me, choose } = useMe(sid, payload?.participants);
+  const [switching, setSwitching] = useState(false);
 
   const [mine, setMine] = useState<Set<number> | null>(null);
   const [save, setSave] = useState<SaveState>("idle");
@@ -152,22 +153,39 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
     navigate(`/s/${sid}`);
   };
 
-  const updateTz = async (next: string) => {
-    if (!me) return;
-    const updated = await api.updateTz(sid, me.id, next);
-    if (data) {
-      setData({
-        ...data,
-        payload: { ...payload, participants: participants.map((p) => (p.id === updated.id ? updated : p)) },
-      });
+  const pick = async (p: Participant) => {
+    setSwitching(false);
+    if (p.id === me?.id) return;
+    if (me && mine) {
+      // Save the current person's unsaved painting before switching away from them,
+      // and keep it in the local copy so their times show up straight away.
+      const wasDirty = dirty.current;
+      const slots = [...mine];
+      if (wasDirty) {
+        try {
+          await api.saveAvailability(sid, mid, me.id, slots);
+        } catch {
+          setSave("error");
+          return;
+        }
+      }
+      if (wasDirty || me.id in payload.availability) {
+        setData((d) =>
+          d ? { ...d, payload: { ...d.payload, availability: { ...d.payload.availability, [me.id]: slots } } } : d,
+        );
+      }
     }
+    dirty.current = false;
+    savedAt.current = 0;
+    setSave("idle");
+    choose(p.id);
   };
 
-  const onJoined = (p: Participant) => {
-    setMeId(p.id);
+  const added = (p: Participant) => {
     if (data && !participants.some((x) => x.id === p.id)) {
       setData({ ...data, payload: { ...payload, participants: [...participants, p] } });
     }
+    pick(p);
   };
 
   return (
@@ -192,14 +210,13 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
           )}
         </div>
         <div className="row">
+          {me && <WhoAmI me={me} onSwitch={() => setSwitching(true)} />}
           <CopyLink />
           <button className="ghost danger" onClick={remove}>
             Delete meeting
           </button>
         </div>
       </header>
-
-      {me && <TzDriftNotice me={me} onUpdate={updateTz} />}
 
       {chosenSlots && <ChosenBanner meeting={meeting} zones={zones} participants={participants} onUnlock={unlock} />}
 
@@ -329,8 +346,17 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
         </section>
       </div>
 
-      {!me && (
-        <JoinDialog sid={sid} sessionName={payload.session.name} participants={participants} onJoined={onJoined} />
+      {(!me || switching) && (
+        <PersonPicker
+          sid={sid}
+          sessionName={payload.session.name}
+          participants={participants}
+          currentId={me?.id ?? null}
+          lastId={getLastMe(sid)}
+          onPick={pick}
+          onAdded={added}
+          onCancel={me ? () => setSwitching(false) : undefined}
+        />
       )}
     </main>
   );

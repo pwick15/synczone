@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Participant } from "../../shared/types";
 import { INITIALS_RE } from "../../shared/types";
 import { api, ApiError } from "../api";
-import { setMe } from "../storage";
 import { allTimeZones, browserTz, fmtTime, tzCity, tzLabel, tzOffset } from "../time";
 
 export function Avatar({ p, size = "md", dim }: { p: Participant; size?: "sm" | "md"; dim?: boolean }) {
@@ -29,16 +28,29 @@ export function TzSelect({ value, onChange, id }: { value: string; onChange: (tz
   );
 }
 
-export function JoinDialog({
+/**
+ * "Who are you?" — pick someone already in the session, or add yourself as someone new.
+ * Shown in every new tab, and from the header's Switch button.
+ */
+export function PersonPicker({
   sid,
   sessionName,
   participants,
-  onJoined,
+  currentId,
+  lastId,
+  onPick,
+  onAdded,
+  onCancel,
 }: {
   sid: string;
   sessionName: string;
   participants: Participant[];
-  onJoined: (p: Participant) => void;
+  currentId: string | null;
+  lastId: string | null;
+  onPick: (p: Participant) => void;
+  onAdded: (p: Participant) => void;
+  /** Present when the picker can be closed without choosing (switching, not first visit). */
+  onCancel?: () => void;
 }) {
   const [initials, setInitials] = useState("");
   const [tz, setTz] = useState(browserTz);
@@ -46,76 +58,119 @@ export function JoinDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const claim = (p: Participant) => {
-    setMe(sid, p.id);
-    onJoined(p);
-  };
+  useEffect(() => {
+    if (!onCancel) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
-  const submit = async (e: FormEvent) => {
+  const add = async (e: FormEvent) => {
     e.preventDefault();
     const clean = initials.trim().toUpperCase();
     if (!INITIALS_RE.test(clean)) return setError("Use 1–4 letters or numbers.");
+    const existing = participants.find((p) => p.initials === clean);
+    if (existing) return setError(`${clean} is already here. Tap them above if that's you, or add a letter.`);
     setBusy(true);
     setError(null);
     try {
-      claim(await api.join(sid, clean, tz));
+      onAdded(await api.join(sid, clean, tz));
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 409
-          ? `${clean} is already in this session. If that's you, pick it below. Otherwise add a letter.`
+          ? `${clean} was just added by someone else. Pick a different set of initials.`
           : (err as Error).message,
       );
-    } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="overlay">
-      <form className="dialog" onSubmit={submit}>
-        <p className="eyebrow">Joining</p>
-        <h2>{sessionName}</h2>
-        <label htmlFor="initials">Your initials</label>
-        <input
-          id="initials"
-          className="initials-input"
-          value={initials}
-          onChange={(e) => setInitials(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4))}
-          placeholder="e.g. PW"
-          autoFocus
-          autoComplete="off"
-          autoCapitalize="characters"
-        />
-        <div className="field-note">
-          {editTz ? (
-            <TzSelect value={tz} onChange={setTz} />
-          ) : (
-            <>
-              Time zone: <strong>{tzLabel(tz)}</strong>{" "}
-              <button type="button" className="link" onClick={() => setEditTz(true)}>
-                Change
-              </button>
-            </>
-          )}
-        </div>
-        {error && <p className="error">{error}</p>}
-        <button className="primary" disabled={busy || !initials}>
-          {busy ? "Joining…" : "Join"}
-        </button>
+    <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && onCancel?.()}>
+      <div className="dialog picker" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+        <p className="eyebrow">{sessionName}</p>
+        <h2 id="picker-title">Who are you?</h2>
+
         {participants.length > 0 && (
-          <div className="claim">
-            <p className="muted">Already joined on another device? Pick yourself:</p>
-            <div className="chips">
-              {participants.map((p) => (
-                <button type="button" key={p.id} className="chip" onClick={() => claim(p)}>
-                  <Avatar p={p} size="sm" /> {tzCity(p.tz)}
+          <ul className="people">
+            {participants.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  className={`person${p.id === currentId ? " current" : ""}${p.id === lastId ? " last" : ""}`}
+                  onClick={() => onPick(p)}
+                >
+                  <Avatar p={p} />
+                  <span className="person-info">
+                    <strong>{p.initials}</strong>
+                    <span className="muted">{tzCity(p.tz)}</span>
+                  </span>
+                  {p.id === currentId ? (
+                    <span className="tag">Current</span>
+                  ) : (
+                    p.id === lastId && <span className="tag">Last time</span>
+                  )}
                 </button>
-              ))}
-            </div>
-          </div>
+              </li>
+            ))}
+          </ul>
         )}
-      </form>
+
+        <form className="add-person" onSubmit={add}>
+          <label htmlFor="initials">{participants.length ? "Someone new? Add yourself" : "Add yourself to get started"}</label>
+          <div className="row">
+            <input
+              id="initials"
+              className="initials-input"
+              value={initials}
+              onChange={(e) => {
+                setError(null);
+                setInitials(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4));
+              }}
+              placeholder="Initials"
+              autoFocus={participants.length === 0}
+              autoComplete="off"
+              autoCapitalize="characters"
+            />
+            <button className="primary" disabled={busy || !initials}>
+              {busy ? "Adding…" : "Add"}
+            </button>
+          </div>
+          <div className="field-note">
+            {editTz ? (
+              <TzSelect value={tz} onChange={setTz} />
+            ) : (
+              <>
+                Time zone: <strong>{tzLabel(tz)}</strong>{" "}
+                <button type="button" className="link" onClick={() => setEditTz(true)}>
+                  Change
+                </button>
+              </>
+            )}
+          </div>
+          {error && <p className="error">{error}</p>}
+        </form>
+
+        {onCancel && (
+          <button type="button" className="ghost picker-cancel" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
+  );
+}
+
+/** Header control showing who you are in this tab, with a way to switch. */
+export function WhoAmI({ me, onSwitch }: { me: Participant; onSwitch: () => void }) {
+  return (
+    <button className="whoami" onClick={onSwitch} title="Switch person">
+      <Avatar p={me} size="sm" />
+      <span>
+        You're <strong>{me.initials}</strong>
+      </span>
+      <span className="whoami-switch">Switch</span>
+    </button>
   );
 }
 
@@ -176,23 +231,5 @@ export function TeamList({
         </li>
       ))}
     </ul>
-  );
-}
-
-/** Offers to update a stored time zone when the browser now reports a different one. */
-export function TzDriftNotice({ me, onUpdate }: { me: Participant; onUpdate: (tz: string) => void }) {
-  const current = browserTz();
-  const [dismissed, setDismissed] = useState(false);
-  if (dismissed || current === me.tz || tzOffset(current) === tzOffset(me.tz)) return null;
-  return (
-    <div className="notice">
-      <span>
-        Your device is on <strong>{tzLabel(current)}</strong>, but you joined as {tzLabel(me.tz)}.
-      </span>
-      <button onClick={() => onUpdate(current)}>Switch to {tzCity(current)}</button>
-      <button className="ghost" onClick={() => setDismissed(true)}>
-        Keep
-      </button>
-    </div>
   );
 }

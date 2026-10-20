@@ -3,7 +3,7 @@
 Find meeting times across time zones. Create a session, share its link, and everyone marks when they're free in their own local time. Each session holds any number of meetings, and each meeting tracks its own availability.
 
 - **Sessions** have an unguessable URL (`/s/<id>`). Only people with the link can see them. Anyone with the link can edit or delete the session and its meetings, so treat it like a shared doc link. Deleting can't be undone.
-- **Joining** asks for initials (1–4 letters or numbers, unique per session) and detects your time zone. The browser remembers who you are. On a new device, pick your initials from the list instead of typing them again.
+- **Who are you?** Every new tab asks you to pick someone already in the session or add yourself (initials: 1–4 letters or numbers, unique per session; time zone detected). A reload keeps your pick, and whoever you picked last time is highlighted. Use **Switch** in the header to change person or add someone new.
 - **Meetings** cover 1–14 days, from midnight in the creator's time zone, in 15, 30, or 60-minute blocks.
 - **Your availability**: drag to paint a rectangle of free time; drag over painted time to clear it. Saves automatically.
 - **Overlap shading**: behind your own painting, the grid shades where everyone else overlaps, plus a ±30 min buffer (adjustable). With no common time, it shades where the most people overlap. Hover or tap a time to see who's free.

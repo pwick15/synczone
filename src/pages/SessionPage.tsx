@@ -2,16 +2,17 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { MeetingSummary, Participant } from "../../shared/types";
 import { MAX_DAYS, SLOT_OPTIONS } from "../../shared/types";
 import { api, ApiError } from "../api";
-import { JoinDialog, TeamList, TzDriftNotice } from "../components/People";
+import { PersonPicker, TeamList, WhoAmI } from "../components/People";
 import { Link, navigate } from "../router";
-import { forgetSession, rememberSession } from "../storage";
+import { forgetSession, getLastMe, rememberSession } from "../storage";
 import { useMe } from "../useMe";
 import { usePoll } from "../usePoll";
 import { browserTz, fmtDay, fmtRange, todayIn, tzLabel, zonedMidnight } from "../time";
 
 export function SessionPage({ sid }: { sid: string }) {
   const { data, setData, error, refresh } = usePoll(() => api.getSession(sid), 15_000, [sid]);
-  const { me, setMeId } = useMe(sid, data?.participants);
+  const { me, choose } = useMe(sid, data?.participants);
+  const [switching, setSwitching] = useState(false);
 
   const gone = error instanceof ApiError && error.status === 404;
   useEffect(() => {
@@ -30,9 +31,14 @@ export function SessionPage({ sid }: { sid: string }) {
     setData({ ...data, participants: data.participants.map((p) => (p.id === updated.id ? updated : p)) });
   };
 
-  const onJoined = (p: Participant) => {
-    setMeId(p.id);
+  const pick = (p: Participant) => {
+    choose(p.id);
+    setSwitching(false);
+  };
+
+  const added = (p: Participant) => {
     if (!data.participants.some((x) => x.id === p.id)) setData({ ...data, participants: [...data.participants, p] });
+    pick(p);
   };
 
   return (
@@ -44,10 +50,11 @@ export function SessionPage({ sid }: { sid: string }) {
           </p>
           <h1>{data.session.name}</h1>
         </div>
-        <CopyLink />
+        <div className="row">
+          {me && <WhoAmI me={me} onSwitch={() => setSwitching(true)} />}
+          <CopyLink />
+        </div>
       </header>
-
-      {me && <TzDriftNotice me={me} onUpdate={updateTz} />}
 
       <div className="session-layout">
         <section className="card">
@@ -78,8 +85,17 @@ export function SessionPage({ sid }: { sid: string }) {
 
       <DeleteSession sid={sid} name={data.session.name} meetings={data.meetings.length} people={data.participants.length} />
 
-      {!me && (
-        <JoinDialog sid={sid} sessionName={data.session.name} participants={data.participants} onJoined={onJoined} />
+      {(!me || switching) && (
+        <PersonPicker
+          sid={sid}
+          sessionName={data.session.name}
+          participants={data.participants}
+          currentId={me?.id ?? null}
+          lastId={getLastMe(sid)}
+          onPick={pick}
+          onAdded={added}
+          onCancel={me ? () => setSwitching(false) : undefined}
+        />
       )}
     </main>
   );
