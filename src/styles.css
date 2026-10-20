@@ -440,8 +440,17 @@ label.inline select {
   padding: 0;
   margin: 0 0 16px;
 }
+.meetings li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .meetings li + li {
   margin-top: 8px;
+}
+.meetings .meeting-row {
+  flex: 1;
+  min-width: 0;
 }
 .meeting-row {
   display: grid;
@@ -953,4 +962,20 @@ label.inline select {
 .danger-zone {
   display: flex;
   justify-content: flex-end;
+}
+.confirm-delete {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+button.danger-solid {
+  background: var(--danger);
+  color: var(--surface);
+}
+button.danger-solid:not(:disabled):hover {
+  background: color-mix(in srgb, var(--danger) 85%, var(--text));
 }

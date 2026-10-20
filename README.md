@@ -2,11 +2,11 @@
 
 Find meeting times across time zones. Create a session, share its link, and everyone marks when they're free in their own local time. Each session holds any number of meetings, and each meeting tracks its own availability.
 
-- **Sessions** have an unguessable URL (`/s/<id>`). Only people with the link can see them. Anyone with the link can edit, so treat it like a shared doc link.
+- **Sessions** have an unguessable URL (`/s/<id>`). Only people with the link can see them. Anyone with the link can edit or delete the session and its meetings, so treat it like a shared doc link. Deleting can't be undone.
 - **Joining** asks for initials (1–4 letters or numbers, unique per session) and detects your time zone. The browser remembers who you are. On a new device, pick your initials from the list instead of typing them again.
 - **Meetings** cover 1–14 days, from midnight in the creator's time zone, in 15, 30, or 60-minute blocks.
 - **Your availability**: drag to paint a rectangle of free time; drag over painted time to clear it. Saves automatically.
-- **Everyone**: a heatmap of overlap. Hover or tap a time to see who's free.
+- **Overlap shading**: behind your own painting, the grid shades where everyone else overlaps, plus a ±30 min buffer (adjustable). With no common time, it shades where the most people overlap. Hover or tap a time to see who's free.
 - **Best times**: ranked windows for a chosen meeting length, each shown in every teammate's time zone. Lock one in, and everyone sees it with an "Add to calendar" (.ics) button.
 
 Times are stored in UTC and shown in each viewer's zone, so daylight-saving changes are handled. Pages refresh every 10–15 seconds while the tab is visible.
@@ -60,6 +60,7 @@ Wrangler prints your `https://<project>.pages.dev` URL. Run `npm run deploy` aga
 | --- | --- | --- |
 | POST | `/api/sessions` | Create a session `{ name }` |
 | GET | `/api/s/:sid` | Session, participants, meetings |
+| DELETE | `/api/s/:sid` | Delete a session and everything in it |
 | POST | `/api/s/:sid/participants` | Join `{ initials, tz }` |
 | PATCH | `/api/s/:sid/participants/:pid` | Change time zone `{ tz }` |
 | POST | `/api/s/:sid/meetings` | Create a meeting `{ title, startUtc, endUtc, slotMinutes, tz }` |

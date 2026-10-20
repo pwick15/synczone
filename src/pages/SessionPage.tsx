@@ -4,7 +4,7 @@ import { MAX_DAYS, SLOT_OPTIONS } from "../../shared/types";
 import { api, ApiError } from "../api";
 import { JoinDialog, TeamList, TzDriftNotice } from "../components/People";
 import { Link, navigate } from "../router";
-import { rememberSession } from "../storage";
+import { forgetSession, rememberSession } from "../storage";
 import { useMe } from "../useMe";
 import { usePoll } from "../usePoll";
 import { browserTz, fmtDay, fmtRange, todayIn, tzLabel, zonedMidnight } from "../time";
@@ -13,11 +13,15 @@ export function SessionPage({ sid }: { sid: string }) {
   const { data, setData, error, refresh } = usePoll(() => api.getSession(sid), 15_000, [sid]);
   const { me, setMeId } = useMe(sid, data?.participants);
 
+  const gone = error instanceof ApiError && error.status === 404;
   useEffect(() => {
-    if (data) rememberSession(sid, data.session.name);
-  }, [sid, data?.session.name]);
+    if (data && !gone) rememberSession(sid, data.session.name);
+  }, [sid, data?.session.name, gone]);
+  useEffect(() => {
+    if (gone) forgetSession(sid);
+  }, [sid, gone]);
 
-  if (error instanceof ApiError && error.status === 404) return <NotFound what="session" />;
+  if (gone) return <NotFound what="session" />;
   if (!data) return <main className="page">{error ? <p className="error">{error.message}</p> : <Loading />}</main>;
 
   const updateTz = async (tz: string) => {
@@ -51,7 +55,13 @@ export function SessionPage({ sid }: { sid: string }) {
           {data.meetings.length === 0 ? (
             <p className="muted">No meetings yet. Create one below and pick the days you're looking at.</p>
           ) : (
-            <MeetingList sid={sid} meetings={data.meetings} total={data.participants.length} tz={me?.tz ?? browserTz()} />
+            <MeetingList
+              sid={sid}
+              meetings={data.meetings}
+              total={data.participants.length}
+              tz={me?.tz ?? browserTz()}
+              onDeleted={refresh}
+            />
           )}
           <NewMeeting sid={sid} me={me} onCreated={refresh} />
         </section>
@@ -66,6 +76,8 @@ export function SessionPage({ sid }: { sid: string }) {
         </aside>
       </div>
 
+      <DeleteSession sid={sid} name={data.session.name} meetings={data.meetings.length} people={data.participants.length} />
+
       {!me && (
         <JoinDialog sid={sid} sessionName={data.session.name} participants={data.participants} onJoined={onJoined} />
       )}
@@ -73,7 +85,28 @@ export function SessionPage({ sid }: { sid: string }) {
   );
 }
 
-function MeetingList({ sid, meetings, total, tz }: { sid: string; meetings: MeetingSummary[]; total: number; tz: string }) {
+function MeetingList({
+  sid,
+  meetings,
+  total,
+  tz,
+  onDeleted,
+}: {
+  sid: string;
+  meetings: MeetingSummary[];
+  total: number;
+  tz: string;
+  onDeleted: () => void;
+}) {
+  const remove = async (m: MeetingSummary) => {
+    if (!window.confirm(`Delete "${m.title}" and everyone's availability for it? This can't be undone.`)) return;
+    try {
+      await api.deleteMeeting(sid, m.id);
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 404)) return window.alert((err as Error).message);
+    }
+    onDeleted();
+  };
   return (
     <ul className="meetings">
       {meetings.map((m) => (
@@ -91,9 +124,62 @@ function MeetingList({ sid, meetings, total, tz }: { sid: string; meetings: Meet
               </span>
             )}
           </Link>
+          <button className="ghost danger small" onClick={() => remove(m)} aria-label={`Delete ${m.title}`}>
+            Delete
+          </button>
         </li>
       ))}
     </ul>
+  );
+}
+
+function DeleteSession({ sid, name, meetings, people }: { sid: string; name: string; meetings: number; people: number }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await api.deleteSession(sid);
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 404)) {
+        setError((err as Error).message);
+        setBusy(false);
+        return;
+      }
+    }
+    forgetSession(sid);
+    navigate("/");
+  };
+
+  if (!confirming) {
+    return (
+      <footer className="danger-zone">
+        <button className="ghost danger small" onClick={() => setConfirming(true)}>
+          Delete session
+        </button>
+      </footer>
+    );
+  }
+  const meetingCount = `${meetings} ${meetings === 1 ? "meeting" : "meetings"}`;
+  const peopleCount = `${people} ${people === 1 ? "person" : "people"}`;
+  return (
+    <section className="confirm-delete">
+      <p>
+        Delete <strong>{name}</strong> for everyone? This removes {meetingCount}, {peopleCount} and all their
+        availability. The link will stop working. This can't be undone.
+      </p>
+      {error && <p className="error">{error}</p>}
+      <div className="row">
+        <button className="danger-solid" onClick={remove} disabled={busy}>
+          {busy ? "Deleting…" : "Delete session"}
+        </button>
+        <button className="ghost" onClick={() => setConfirming(false)} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -223,12 +309,12 @@ export function CopyLink({ path }: { path?: string }) {
 
 export const Loading = () => <p className="muted">Loading…</p>;
 
-export function NotFound({ what }: { what: string }) {
+export function NotFound({ what, back }: { what: string; back?: { href: string; label: string } }) {
   return (
     <main className="page">
       <h1>That {what} doesn't exist</h1>
-      <p className="muted">Check the link, or ask whoever shared it to send it again.</p>
-      <Link href="/">Go to SyncZone</Link>
+      <p className="muted">It may have been deleted, or the link is wrong.</p>
+      <Link href={back?.href ?? "/"}>{back?.label ?? "Go to SyncZone"}</Link>
     </main>
   );
 }

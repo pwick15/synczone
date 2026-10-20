@@ -161,6 +161,18 @@ async function route(ctx: Ctx): Promise<Response> {
     return json(payload);
   }
 
+  // DELETE /api/s/:sid  (removes everything in the session)
+  if (rest.length === 0 && method === "DELETE") {
+    await requireSession(db, sid);
+    await db.batch([
+      db.prepare("DELETE FROM availability WHERE meeting_id IN (SELECT id FROM meetings WHERE session_id = ?)").bind(sid),
+      db.prepare("DELETE FROM meetings WHERE session_id = ?").bind(sid),
+      db.prepare("DELETE FROM participants WHERE session_id = ?").bind(sid),
+      db.prepare("DELETE FROM sessions WHERE id = ?").bind(sid),
+    ]);
+    return json({ ok: true });
+  }
+
   // POST /api/s/:sid/participants
   if (rest.length === 1 && rest[0] === "participants" && method === "POST") {
     await requireSession(db, sid);

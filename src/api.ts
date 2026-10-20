@@ -32,6 +32,7 @@ export interface NewMeeting {
 export const api = {
   createSession: (name: string) => req<{ id: string }>("POST", "/sessions", { name }),
   getSession: (sid: string) => req<SessionPayload>("GET", `/s/${sid}`),
+  deleteSession: (sid: string) => req<{ ok: true }>("DELETE", `/s/${sid}`),
   join: (sid: string, initials: string, tz: string) =>
     req<Participant>("POST", `/s/${sid}/participants`, { initials, tz }),
   updateTz: (sid: string, pid: string, tz: string) =>

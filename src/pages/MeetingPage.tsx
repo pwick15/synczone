@@ -99,7 +99,9 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
     [meeting, zonedList, showNight, nightUsed],
   );
 
-  if (error instanceof ApiError && error.status === 404) return <NotFound what="meeting" />;
+  if (error instanceof ApiError && error.status === 404) {
+    return <NotFound what="meeting" back={{ href: `/s/${sid}`, label: "Back to the session" }} />;
+  }
   if (!payload || !meeting || !grid) {
     return <main className="page">{error ? <p className="error">{error.message}</p> : <Loading />}</main>;
   }
@@ -141,8 +143,12 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
   const unlock = async () => setMeeting(await api.updateMeeting(sid, mid, { chosenStart: null }));
 
   const remove = async () => {
-    if (!window.confirm(`Delete "${meeting.title}" and everyone's availability for it?`)) return;
-    await api.deleteMeeting(sid, mid);
+    if (!window.confirm(`Delete "${meeting.title}" and everyone's availability for it? This can't be undone.`)) return;
+    try {
+      await api.deleteMeeting(sid, mid);
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 404)) return window.alert((err as Error).message);
+    }
     navigate(`/s/${sid}`);
   };
 
@@ -185,7 +191,12 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
             </p>
           )}
         </div>
-        <CopyLink />
+        <div className="row">
+          <CopyLink />
+          <button className="ghost danger" onClick={remove}>
+            Delete meeting
+          </button>
+        </div>
       </header>
 
       {me && <TzDriftNotice me={me} onUpdate={updateTz} />}
@@ -317,12 +328,6 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
           )}
         </section>
       </div>
-
-      <footer className="danger-zone">
-        <button className="ghost danger small" onClick={remove}>
-          Delete meeting
-        </button>
-      </footer>
 
       {!me && (
         <JoinDialog sid={sid} sessionName={payload.session.name} participants={participants} onJoined={onJoined} />
