@@ -91,17 +91,6 @@ export function commonOverlap(
   return { levels, people, together };
 }
 
-/** Per-slot tint strength (0–100) for how many of `others` are free, so individual times stay visible but quiet. */
-export function othersTint(meeting: Meeting, others: Participant[], availability: Record<string, number[]>): Uint8Array {
-  const n = slotCount(meeting);
-  const tint = new Uint8Array(n);
-  if (!others.length) return tint;
-  const counts = new Uint16Array(n);
-  for (const p of others) for (const i of availability[p.id] ?? []) if (i < n) counts[i]++;
-  for (let i = 0; i < n; i++) if (counts[i]) tint[i] = Math.round(18 + (counts[i] / others.length) * 42);
-  return tint;
-}
-
 export interface Suggestion {
   /** Slot index where the shared free span begins. */
   start: number;
@@ -162,8 +151,8 @@ export function suggest(
   return kept.map((s) => ({ start: s.start, end: s.end, free: s.who.map((p) => respondents[p]) }));
 }
 
-/** A minimal iCalendar file for the locked-in time. */
-export function icsFor(meeting: Meeting, url: string): string {
+/** A minimal iCalendar file for one meeting time. */
+export function icsFor(meeting: Meeting, start: number, end: number, url: string): string {
   const stamp = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   const esc = (s: string) => s.replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\n/g, "\\n");
   return [
@@ -173,8 +162,8 @@ export function icsFor(meeting: Meeting, url: string): string {
     "BEGIN:VEVENT",
     `UID:${meeting.id}@synczone`,
     `DTSTAMP:${stamp(Date.now())}`,
-    `DTSTART:${stamp(meeting.chosenStart!)}`,
-    `DTEND:${stamp(meeting.chosenEnd!)}`,
+    `DTSTART:${stamp(start)}`,
+    `DTEND:${stamp(end)}`,
     `SUMMARY:${esc(meeting.title)}`,
     `DESCRIPTION:${esc(`Scheduled with SyncZone: ${url}`)}`,
     "END:VEVENT",

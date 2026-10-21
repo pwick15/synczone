@@ -20,7 +20,7 @@
   --chosen: #d97a00;
   --common: #2a5bd7;
   --buffer-stripe: rgb(42 91 215 / 0.4);
-  --others: #8d9bc4;
+  --lane-empty: rgb(0 0 0 / 0.05);
   --radius: 12px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
 
@@ -59,7 +59,7 @@
     --chosen: #ffa940;
     --common: #6f98ff;
     --buffer-stripe: rgb(111 152 255 / 0.45);
-  --others: #56658f;
+  --lane-empty: rgb(255 255 255 / 0.05);
     --shadow: none;
     color-scheme: dark;
   }
@@ -87,7 +87,7 @@
   --chosen: #ffa940;
   --common: #6f98ff;
   --buffer-stripe: rgb(111 152 255 / 0.45);
-  --others: #56658f;
+  --lane-empty: rgb(255 255 255 / 0.05);
   --shadow: none;
   color-scheme: dark;
 }
@@ -547,13 +547,17 @@ label.inline select {
 /* Avatars */
 
 .avatar {
-  display: inline-grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   color: #fff;
   font-weight: 650;
-  letter-spacing: 0.02em;
+  line-height: 1;
+  letter-spacing: 0;
+  text-align: center;
   flex: none;
+  overflow: hidden;
 }
 .avatar-md {
   width: 34px;
@@ -819,18 +823,28 @@ label.inline select {
   border-radius: 3px;
   flex: none;
 }
-.swatch-mine {
-  background: linear-gradient(to right, var(--cell) 0 3px, var(--mine) 3px 11px, var(--cell) 11px);
-  box-shadow: inset 0 0 0 1px var(--border);
-}
 .swatch-common {
   background: var(--common);
 }
 .swatch-buffer {
   background: repeating-linear-gradient(-45deg, var(--buffer-stripe) 0 3px, var(--cell) 3px 6px);
 }
-.swatch-others {
-  background: linear-gradient(to right, color-mix(in oklab, var(--others) 20%, var(--cell)), color-mix(in oklab, var(--others) 60%, var(--cell)));
+.lanes-key {
+  gap: 10px;
+}
+.lane-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+}
+.lane-swatch {
+  width: 4px;
+  height: 14px;
+  border-radius: 1px;
+}
+.lane-swatch.me {
+  width: 6px;
 }
 
 .readout {
@@ -875,7 +889,7 @@ label.inline select {
 
 .grid {
   display: grid;
-  grid-template-columns: 64px repeat(var(--cols), minmax(42px, 1fr));
+  grid-template-columns: 64px repeat(var(--cols), minmax(calc(var(--lw, 0px) + 40px), 1fr));
   user-select: none;
   -webkit-user-select: none;
   min-width: min-content;
@@ -924,36 +938,42 @@ label.inline select {
 .cell.off {
   background: repeating-linear-gradient(-45deg, var(--cell-off) 0 3px, transparent 3px 7px);
 }
-/* Other people's times: a quiet tint, stronger as more of them are free. */
-.cell.tint {
-  background-color: color-mix(in oklab, var(--others) var(--o), var(--cell));
+/* Each person's availability: thin colored lanes down the left edge of the column. */
+.cell .lanes {
+  position: absolute;
+  left: 3px;
+  top: -1px;
+  bottom: 0;
+  width: var(--lw);
+  pointer-events: none;
 }
-/* Times everyone can make: the one thing that should jump out. */
-.cell.common {
-  background: var(--common);
-  border-top-color: transparent;
-}
-.cell.common.hour {
-  border-top-color: color-mix(in srgb, var(--surface) 35%, transparent);
-}
-.cell.buffer {
-  background-image: repeating-linear-gradient(-45deg, var(--buffer-stripe) 0 3px, transparent 3px 7px);
-}
-.cell.common.on::before {
-  display: none;
-}
-/* Your own times: a muted inset bar, hidden inside the overlap where you're already counted. */
-.cell.on::before {
+/* The shared time takes the main part of the column. */
+.cell.common::before,
+.cell.buffer::before {
   content: "";
   position: absolute;
-  inset: -1px max(6px, 14%) 0;
-  background: var(--mine);
+  left: calc(var(--lw) + 7px);
+  right: 3px;
+  top: -1px;
+  bottom: 0;
   pointer-events: none;
+}
+.cell.common::before {
+  background: var(--common);
+}
+.cell.buffer::before {
+  background: repeating-linear-gradient(-45deg, var(--buffer-stripe) 0 3px, transparent 3px 7px);
+}
+.cell.paint-add {
+  background-color: color-mix(in oklab, var(--mine) 22%, var(--cell));
+}
+.cell.paint-remove {
+  background-color: color-mix(in oklab, var(--danger) 14%, var(--cell));
 }
 .cell.locked::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -1px 0 0 calc(var(--lw) + 4px);
   box-shadow: inset 3px 0 0 var(--chosen), inset -3px 0 0 var(--chosen);
   pointer-events: none;
 }
@@ -974,27 +994,115 @@ label.inline select {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
+.suggestions > li {
+  display: flex;
+}
 .suggestion {
+  width: 100%;
+  text-align: left;
+  font-weight: 400;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 2px;
+  transition: border-color 120ms, box-shadow 120ms, transform 120ms;
+}
+.suggestion:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.08);
+  transform: translateY(-1px);
 }
 .suggestion.everyone {
   border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
 }
-.suggestion-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
+.suggestion.everyone:hover {
+  border-color: var(--accent);
 }
-.suggestion-time {
-  font-size: 1rem;
+.s-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.s-day {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 560;
+}
+.s-time {
+  font-size: 1.35rem;
   font-weight: 650;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.s-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.s-others {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.s-other {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.s-who {
+  font-weight: 600;
+  color: var(--text);
+}
+.s-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.s-cta {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.suggestion:hover .s-cta,
+.suggestion:focus-visible .s-cta {
+  color: var(--accent);
+}
+
+/* Lock-in dialog */
+
+.lock-dialog {
+  gap: 10px;
+}
+.lock-start {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+}
+.lock-main {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+.lock-actions {
+  margin-top: 4px;
 }
 
 .zones {

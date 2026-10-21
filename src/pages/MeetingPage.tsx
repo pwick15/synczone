@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Meeting, Participant } from "../../shared/types";
 import { api, ApiError } from "../api";
-import { Grid } from "../components/Grid";
+import { Grid, type Lane } from "../components/Grid";
 import { Avatar, PersonPicker, WhoAmI } from "../components/People";
 import { Link, navigate } from "../router";
 import {
@@ -9,7 +9,6 @@ import {
   icsFor,
   NIGHT_END,
   commonOverlap,
-  othersTint,
   slotCount,
   slotMs,
   slotStart,
@@ -19,7 +18,7 @@ import {
   type Suggestion,
 } from "../schedule";
 import { getLastMe, getPref, rememberSession, setPref } from "../storage";
-import { browserTz, fmtDay, fmtDuration, fmtRange, fmtTime, tzCity, tzOffset } from "../time";
+import { browserTz, fmtDay, fmtDuration, fmtRange, fmtTime, tzCity, tzOffset, zoned } from "../time";
 import { useMe } from "../useMe";
 import { usePoll } from "../usePoll";
 import { CopyLink, Loading, NotFound } from "./SessionPage";
@@ -85,6 +84,7 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
   const [viewTz, setViewTz] = useState<string | null>(null);
   const [showNight, setShowNight] = useState(() => getPref("showNight", false));
   const [hover, setHover] = useState<number | null>(null);
+  const [lockTarget, setLockTarget] = useState<Suggestion | null>(null);
   const [lengthMin, setLengthMin] = useState(60);
   const [bufferPref, setBufferPref] = useState(() => getPref("buffer", 30));
 
@@ -120,16 +120,22 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
   const bufferOptions = [0, 15, 30, 45, 60].filter((m) => m % meeting.slotMinutes === 0);
   const buffer = bufferOptions.includes(bufferPref) ? bufferPref : (bufferOptions.find((m) => m >= bufferPref) ?? 0);
   const overlap = commonOverlap(meeting, respondents, availability, buffer);
-  const tint = othersTint(
-    meeting,
-    respondents.filter((p) => p.id !== me?.id),
-    availability,
-  );
+  // Thin per-person lanes: you first (following your live painting), then everyone who answered.
+  const lanes: Lane[] = [];
+  if (me) lanes.push({ id: me.id, color: me.color, free: new Uint8Array(0), isMe: true });
+  for (const p of respondents) {
+    if (p.id === me?.id) continue;
+    const free = new Uint8Array(n);
+    for (const i of availability[p.id]) if (i < n) free[i] = 1;
+    lanes.push({ id: p.id, color: p.color, free, isMe: false });
+  }
+  const lanePeople = lanes.map((l) => participants.find((p) => p.id === l.id)!);
 
   const lengthOptions = [15, 30, 45, 60, 90, 120, 180].filter((m) => m % meeting.slotMinutes === 0);
   const length = lengthOptions.includes(lengthMin) ? lengthMin : (lengthOptions.find((m) => m >= lengthMin) ?? meeting.slotMinutes);
   const lengthSlots = length / meeting.slotMinutes;
-  const suggestions = suggest(meeting, respondents, availability, lengthSlots);
+  // One person on their own isn't a match, so only offer times at least two people share.
+  const suggestions = suggest(meeting, respondents, availability, lengthSlots).filter((s) => s.free.length >= 2);
 
   const chosenSlots: [number, number] | null =
     meeting.chosenStart && meeting.chosenEnd
@@ -290,12 +296,17 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
                 ))}
               </select>
             </label>
-            <span className="swatch-item">
-              <span className="swatch swatch-mine" /> You
-            </span>
-            <span className="swatch-item">
-              <span className="swatch swatch-others" /> Others (darker = more people)
-            </span>
+            {lanePeople.length > 0 && (
+              <span className="swatch-item lanes-key">
+                Lanes
+                {lanePeople.map((p) => (
+                  <span key={p.id} className="lane-key">
+                    <span className={`lane-swatch c${p.color % 8}${p.id === me?.id ? " me" : ""}`} />
+                    {p.id === me?.id ? `${p.initials} (you)` : p.initials}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           {me && mine ? (
             <>
@@ -304,7 +315,7 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
                 selected={mine}
                 onChange={editMine}
                 overlap={overlap.levels}
-                tint={tint}
+                lanes={lanes}
                 chosen={chosenSlots}
                 onHover={setHover}
               />
@@ -333,30 +344,45 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
               </select>
             </label>
           </div>
-          {respondents.length === 0 ? (
-            <p className="muted">Suggestions appear once people mark their availability.</p>
+          {respondents.length < 2 ? (
+            <p className="muted">Suggestions appear once two people have marked their availability.</p>
           ) : suggestions.length === 0 ? (
-            <p className="muted">No {fmtDuration(length)} stretch works for anyone yet. Try a shorter meeting.</p>
+            <p className="muted">No {fmtDuration(length)} stretch works for two or more people yet. Try a shorter meeting.</p>
           ) : (
             <ol className="suggestions">
               {suggestions.map((s) => (
-                <SuggestionRow
+                <SuggestionCard
                   key={`${s.start}-${s.end}`}
                   s={s}
                   meeting={meeting}
                   tz={tz}
-                  zones={zones}
                   participants={participants}
                   respondents={respondents}
                   waiting={waiting}
                   length={length}
-                  onLockIn={() => lockIn(s.start)}
+                  onOpen={() => setLockTarget(s)}
                 />
               ))}
             </ol>
           )}
         </section>
       </div>
+
+      {lockTarget && (
+        <LockDialog
+          s={lockTarget}
+          meeting={meeting}
+          tz={tz}
+          zones={zones}
+          participants={participants}
+          length={length}
+          onLock={async (startSlot) => {
+            await lockIn(startSlot);
+            setLockTarget(null);
+          }}
+          onClose={() => setLockTarget(null)}
+        />
+      )}
 
       {(!me || switching) && (
         <PersonPicker
@@ -424,7 +450,7 @@ function Readout(props: {
       ? "Only you so far. Shared times light up here once others add theirs."
       : `${people[0].initials} has answered. Paint your times to see where you overlap.`;
   } else if (together === people.length) {
-    text = `Highlighted: when ${names(people, me)} are all free.`;
+    text = `Highlighted: when ${names(people, me)} are ${people.length === 2 ? "both" : "all"} free.`;
     if (!meAnswered) text += " Paint your times to see if you fit.";
   } else if (together >= 2) {
     text = `No time works for all ${people.length} yet. Highlighted where ${together} of you overlap.`;
@@ -459,9 +485,9 @@ function ZoneLines({
           const people = participants.filter((p) => p.tz === z);
           return (
             <li key={z}>
-              <span className="zone-name">
-                {tzCity(z)}
-                {people.length > 0 && <span className="muted"> · {people.map((p) => p.initials).join(", ")}</span>}
+              <span>
+                {people.length > 0 && <span className="zone-name">{people.map((p) => p.initials).join(", ")} </span>}
+                <span className="muted">· {tzCity(z)}</span>
               </span>
               <span>{fmtRange(start, end, z, false)}</span>
             </li>
@@ -471,45 +497,160 @@ function ZoneLines({
   );
 }
 
-function SuggestionRow(props: {
+function downloadIcs(meeting: Meeting, start: number, end: number) {
+  const blob = new Blob([icsFor(meeting, start, end, location.href)], { type: "text/calendar" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${meeting.title.replace(/[^\w -]/g, "").trim() || "meeting"}.ics`;
+  a.click();
+  window.setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/** "9:00 – 10:00", or "23:00 – Wed 1:00" when it runs past midnight. */
+function timeSpan(start: number, end: number, tz: string) {
+  const sameDay = zoned(start, tz).dateKey === zoned(end - 1, tz).dateKey;
+  return sameDay ? `${fmtTime(start, tz)} – ${fmtTime(end, tz)}` : `${fmtTime(start, tz)} – ${fmtDay(end, tz)}, ${fmtTime(end, tz)}`;
+}
+
+/** Your time first and large; everyone else's zones underneath, small. The whole card opens the lock-in dialog. */
+function SuggestionCard(props: {
   s: Suggestion;
   meeting: Meeting;
   tz: string;
-  zones: string[];
   participants: Participant[];
   respondents: Participant[];
   waiting: Participant[];
   length: number;
-  onLockIn: () => void;
+  onOpen: () => void;
 }) {
-  const { s, meeting, tz, zones, participants, respondents, waiting } = props;
+  const { s, meeting, tz, participants, respondents, waiting } = props;
   const start = slotStart(meeting, s.start);
   const end = slotStart(meeting, s.end);
   const spanMinutes = (s.end - s.start) * meeting.slotMinutes;
   const missing = respondents.filter((p) => !s.free.includes(p));
   const everyone = missing.length === 0;
+  const otherZones = [...new Set(participants.map((p) => p.tz))].filter((z) => z !== tz);
   return (
-    <li className={`suggestion${everyone ? " everyone" : ""}`}>
-      <div className="suggestion-main">
-        <span className="suggestion-time">{fmtRange(start, end, tz)}</span>
-        <span className={`badge${everyone ? " ok" : ""}`}>
-          {everyone ? (waiting.length ? "Everyone who answered" : "Everyone") : `${s.free.length} of ${respondents.length}`}
+    <li>
+      <button type="button" className={`suggestion${everyone ? " everyone" : ""}`} onClick={props.onOpen}>
+        <span className="s-top">
+          <span className="s-day">{fmtDay(start, tz)}</span>
+          <span className={`badge${everyone ? " ok" : ""}`}>
+            {everyone ? (waiting.length ? "Everyone who answered" : "Everyone") : `${s.free.length} of ${respondents.length}`}
+          </span>
         </span>
-        {spanMinutes > props.length && <span className="muted small">{fmtDuration(spanMinutes)} window</span>}
-      </div>
-      <div className="who">
-        {s.free.map((p) => (
-          <Avatar key={p.id} p={p} size="sm" />
-        ))}
-        {missing.map((p) => (
-          <Avatar key={p.id} p={p} size="sm" dim />
-        ))}
-      </div>
-      <ZoneLines start={start} end={end} zones={zones} participants={participants} skip={tz} />
-      <button className="secondary small" onClick={props.onLockIn}>
-        Lock in {fmtDuration(props.length)} at {fmtTime(start, tz)}
+        <span className="s-time">{timeSpan(start, end, tz)}</span>
+        <span className="s-label">
+          Your time · {tzCity(tz)}
+          {spanMinutes > props.length && ` · any ${fmtDuration(props.length)} in this ${fmtDuration(spanMinutes)} window`}
+        </span>
+        {otherZones.length > 0 && (
+          <span className="s-others">
+            {otherZones.map((z) => (
+              <span key={z} className="s-other">
+                <span>
+                  <span className="s-who">
+                    {participants
+                      .filter((p) => p.tz === z)
+                      .map((p) => p.initials)
+                      .join(", ")}
+                  </span>{" "}
+                  · {tzCity(z)}
+                </span>
+                <span>{fmtRange(start, end, z, false)}</span>
+              </span>
+            ))}
+          </span>
+        )}
+        {!everyone && (
+          <span className="s-missing">
+            Can't make it {missing.map((p) => <Avatar key={p.id} p={p} size="sm" dim />)}
+          </span>
+        )}
+        <span className="s-cta">Choose this time →</span>
       </button>
     </li>
+  );
+}
+
+/** Pick a start within the suggested window, then lock it in for everyone or grab a calendar invite. */
+function LockDialog(props: {
+  s: Suggestion;
+  meeting: Meeting;
+  tz: string;
+  zones: string[];
+  participants: Participant[];
+  length: number;
+  onLock: (startSlot: number) => Promise<void>;
+  onClose: () => void;
+}) {
+  const { s, meeting, tz, zones, participants, length, onClose } = props;
+  const lengthSlots = length / meeting.slotMinutes;
+  const starts = Array.from({ length: Math.max(1, s.end - s.start - lengthSlots + 1) }, (_, i) => s.start + i);
+  const [startSlot, setStartSlot] = useState(s.start);
+  const [busy, setBusy] = useState(false);
+  const start = slotStart(meeting, startSlot);
+  const end = start + length * 60_000;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog lock-dialog" role="dialog" aria-modal="true" aria-labelledby="lock-title">
+        <p className="eyebrow">Lock in a time</p>
+        <h2 id="lock-title">{meeting.title}</h2>
+
+        {starts.length > 1 && (
+          <label className="lock-start">
+            Start at
+            <select value={startSlot} onChange={(e) => setStartSlot(Number(e.target.value))}>
+              {starts.map((i) => (
+                <option key={i} value={i}>
+                  {fmtTime(slotStart(meeting, i), tz)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="lock-main">
+          <span className="s-day">{fmtDay(start, tz)}</span>
+          <span className="s-time">{timeSpan(start, end, tz)}</span>
+          <span className="s-label">
+            Your time · {tzCity(tz)} · {fmtDuration(length)}
+          </span>
+        </div>
+        <ZoneLines start={start} end={end} zones={zones} participants={participants} skip={tz} />
+
+        <p className="muted small">Locking it in shows this time to everyone in the session.</p>
+        <div className="row lock-actions">
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await props.onLock(startSlot);
+              } catch {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Locking in…" : "Lock in for everyone"}
+          </button>
+          <button className="secondary" onClick={() => downloadIcs(meeting, start, end)}>
+            Download invite (.ics)
+          </button>
+          <button className="ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -524,14 +665,7 @@ function ChosenBanner({
   participants: Participant[];
   onUnlock: () => void;
 }) {
-  const download = () => {
-    const blob = new Blob([icsFor(meeting, location.href)], { type: "text/calendar" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${meeting.title.replace(/[^\w -]/g, "").trim() || "meeting"}.ics`;
-    a.click();
-    window.setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
+  const download = () => downloadIcs(meeting, meeting.chosenStart!, meeting.chosenEnd!);
   return (
     <section className="chosen">
       <div>

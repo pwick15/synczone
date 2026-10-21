@@ -6,8 +6,8 @@ Find meeting times across time zones. Create a session, share its link, and ever
 - **Who are you?** Every new tab asks you to pick someone already in the session or add yourself (initials: 1–4 letters or numbers, unique per session; time zone detected). A reload keeps your pick, and whoever you picked last time is highlighted. Use **Switch** in the header to change person or add someone new.
 - **Meetings** cover 1–14 days, from midnight in the creator's time zone, in 15, 30, or 60-minute blocks.
 - **Your availability**: drag to paint a rectangle of free time; drag over painted time to clear it. Saves automatically.
-- **Overlap highlight**: times when everyone who has answered (you included) is free are filled in solid, with a striped ±30 min buffer (adjustable). Your own times show as a muted bar and other people's as a quiet tint. With no common time, it highlights where the most people overlap. Hover or tap a time to see who's free.
-- **Best times**: ranked windows for a chosen meeting length, each shown in every teammate's time zone. Lock one in, and everyone sees it with an "Add to calendar" (.ics) button.
+- **Overlap highlight**: the main part of each day column fills in solid when everyone who has answered (you included) is free, with a striped ±30 min buffer (adjustable). Each person's own times are a thin lane in their color down the left edge, yours first. With no common time, it highlights where the most people overlap. Hover or tap a time to see who's free.
+- **Best times**: ranked windows for a chosen meeting length where at least two people overlap, shown in your time with everyone else's underneath. Click one to pick a start time, lock it in for everyone, or download a calendar invite (.ics).
 
 Times are stored in UTC and shown in each viewer's zone, so daylight-saving changes are handled. Pages refresh every 10–15 seconds while the tab is visible.
 

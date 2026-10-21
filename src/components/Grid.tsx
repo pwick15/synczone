@@ -9,19 +9,31 @@ interface Rect {
   r1: number;
 }
 
+/** One person's thin availability lane. The viewer's lane comes first and follows their live painting. */
+export interface Lane {
+  id: string;
+  color: number;
+  /** 1 where this person is free. Ignored for the viewer's lane, which uses `selected`. */
+  free: Uint8Array;
+  isMe: boolean;
+}
+
 interface Props {
   model: GridModel;
   selected: Set<number>;
   onChange: (next: Set<number>) => void;
   /** Where everyone overlaps (2) and the buffer around it (1). */
   overlap: OverlapLevels;
-  /** How strongly to tint each slot for other people being free (0–100). */
-  tint: Uint8Array;
+  lanes: Lane[];
   /** Slot range [start, end) to outline as the locked-in time. */
   chosen: [number, number] | null;
   /** The slot under the pointer (or last touched), for the who's-free readout. */
   onHover: (slot: number | null) => void;
 }
+
+const ME_LANE = 6;
+const LANE = 4;
+const GAP = 2;
 
 const cellAt = (x: number, y: number) => {
   const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-di]");
@@ -42,7 +54,7 @@ const inRect = (r: Rect | null, di: number, ri: number) =>
 
 const OVERLAP_CLASS = ["", " buffer", " common"];
 
-export function Grid({ model, selected, onChange, overlap, tint, chosen, onHover }: Props) {
+export function Grid({ model, selected, onChange, overlap, lanes, chosen, onHover }: Props) {
   const drag = useRef<{ anchor: number[]; adding: boolean } | null>(null);
   const [preview, setPreview] = useState<{ rect: Rect; adding: boolean } | null>(null);
 
@@ -88,7 +100,22 @@ export function Grid({ model, selected, onChange, overlap, tint, chosen, onHover
     setPreview(null);
   };
 
-  const style = { "--cols": model.dates.length } as CSSProperties;
+  // Lanes are drawn as one gradient per cell: cheap, and no extra elements.
+  const widths = lanes.map((l) => (l.isMe ? ME_LANE : LANE));
+  const lanesWidth = widths.reduce((sum, w) => sum + w + GAP, 0);
+  const laneImage = (isFree: (lane: Lane) => boolean) => {
+    if (!lanes.length) return undefined;
+    let x = 0;
+    const stops: string[] = [];
+    lanes.forEach((lane, k) => {
+      const color = isFree(lane) ? `var(--p${lane.color % 8})` : "var(--lane-empty)";
+      stops.push(`${color} ${x}px ${x + widths[k]}px`, `transparent ${x + widths[k]}px ${x + widths[k] + GAP}px`);
+      x += widths[k] + GAP;
+    });
+    return `linear-gradient(to right, ${stops.join(", ")})`;
+  };
+
+  const style = { "--cols": model.dates.length, "--lw": `${lanesWidth}px` } as CSSProperties;
 
   return (
     <div className="grid-scroll">
@@ -118,17 +145,18 @@ export function Grid({ model, selected, onChange, overlap, tint, chosen, onHover
             {model.dates.map((d, di) => {
               const slot = model.at(di, ri);
               if (slot === undefined) return <div key={d} className="cell off" data-di={di} data-ri={ri} />;
-              const on = inRect(preview?.rect ?? null, di, ri) ? preview!.adding : selected.has(slot);
+              const painting = inRect(preview?.rect ?? null, di, ri);
+              const on = painting ? preview!.adding : selected.has(slot);
               let cls = "cell" + OVERLAP_CLASS[overlap[slot]];
-              let cellStyle: CSSProperties | undefined;
-              if (tint[slot] && overlap[slot] !== 2) {
-                cls += " tint";
-                cellStyle = { "--o": `${tint[slot]}%` } as CSSProperties;
-              }
-              if (on) cls += " on";
+              if (painting) cls += preview!.adding ? " paint-add" : " paint-remove";
               if (chosen && slot >= chosen[0] && slot < chosen[1]) cls += " locked";
               if (minute % 60 === 0) cls += " hour";
-              return <div key={d} className={cls} style={cellStyle} data-di={di} data-ri={ri} />;
+              const image = laneImage((lane) => (lane.isMe ? on : !!lane.free[slot]));
+              return (
+                <div key={d} className={cls} data-di={di} data-ri={ri}>
+                  {image && <span className="lanes" style={{ backgroundImage: image }} />}
+                </div>
+              );
             })}
           </Row>
         ))}
