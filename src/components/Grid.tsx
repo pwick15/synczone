@@ -1,5 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import type { GridModel, ShadeLevels } from "../schedule";
+import type { GridModel, OverlapLevels } from "../schedule";
 import { fmtDateKey, fmtMinute } from "../time";
 
 interface Rect {
@@ -13,8 +13,10 @@ interface Props {
   model: GridModel;
   selected: Set<number>;
   onChange: (next: Set<number>) => void;
-  /** Background showing where everyone else overlaps. */
-  shade: ShadeLevels;
+  /** Where everyone overlaps (2) and the buffer around it (1). */
+  overlap: OverlapLevels;
+  /** How strongly to tint each slot for other people being free (0–100). */
+  tint: Uint8Array;
   /** Slot range [start, end) to outline as the locked-in time. */
   chosen: [number, number] | null;
   /** The slot under the pointer (or last touched), for the who's-free readout. */
@@ -38,9 +40,9 @@ const sameRect = (a: Rect, b: Rect) => a.d0 === b.d0 && a.d1 === b.d1 && a.r0 ==
 const inRect = (r: Rect | null, di: number, ri: number) =>
   !!r && di >= r.d0 && di <= r.d1 && ri >= r.r0 && ri <= r.r1;
 
-const SHADE_CLASS = ["", " buffer", " overlap"];
+const OVERLAP_CLASS = ["", " buffer", " common"];
 
-export function Grid({ model, selected, onChange, shade, chosen, onHover }: Props) {
+export function Grid({ model, selected, onChange, overlap, tint, chosen, onHover }: Props) {
   const drag = useRef<{ anchor: number[]; adding: boolean } | null>(null);
   const [preview, setPreview] = useState<{ rect: Rect; adding: boolean } | null>(null);
 
@@ -117,11 +119,16 @@ export function Grid({ model, selected, onChange, shade, chosen, onHover }: Prop
               const slot = model.at(di, ri);
               if (slot === undefined) return <div key={d} className="cell off" data-di={di} data-ri={ri} />;
               const on = inRect(preview?.rect ?? null, di, ri) ? preview!.adding : selected.has(slot);
-              let cls = "cell" + SHADE_CLASS[shade[slot]];
+              let cls = "cell" + OVERLAP_CLASS[overlap[slot]];
+              let cellStyle: CSSProperties | undefined;
+              if (tint[slot] && overlap[slot] !== 2) {
+                cls += " tint";
+                cellStyle = { "--o": `${tint[slot]}%` } as CSSProperties;
+              }
               if (on) cls += " on";
               if (chosen && slot >= chosen[0] && slot < chosen[1]) cls += " locked";
               if (minute % 60 === 0) cls += " hour";
-              return <div key={d} className={cls} data-di={di} data-ri={ri} />;
+              return <div key={d} className={cls} style={cellStyle} data-di={di} data-ri={ri} />;
             })}
           </Row>
         ))}

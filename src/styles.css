@@ -10,7 +10,7 @@
   --accent-hover: #2350c2;
   --accent-soft: #e6edfc;
   --on-accent: #ffffff;
-  --mine: #1f8a5c;
+  --mine: #6bb592;
   --cell: #f1f0eb;
   --cell-off: #e7e6e0;
   --ok: #1f7a50;
@@ -18,8 +18,9 @@
   --danger: #b93a3a;
   --warn-soft: #fdf3dc;
   --chosen: #d97a00;
-  --overlap: #b9c8ee;
-  --buffer: #d8e0f3;
+  --common: #2a5bd7;
+  --buffer-stripe: rgb(42 91 215 / 0.4);
+  --others: #8d9bc4;
   --radius: 12px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
 
@@ -48,7 +49,7 @@
     --accent-hover: #86a9ff;
     --accent-soft: #1f2a44;
     --on-accent: #0d1424;
-    --mine: #3fbf86;
+    --mine: #3c8f69;
     --cell: #262624;
     --cell-off: #1a1a19;
     --ok: #5fcf97;
@@ -56,8 +57,9 @@
     --danger: #f07c7c;
     --warn-soft: #3a3020;
     --chosen: #ffa940;
-    --overlap: #3f548c;
-    --buffer: #2a3046;
+    --common: #6f98ff;
+    --buffer-stripe: rgb(111 152 255 / 0.45);
+  --others: #56658f;
     --shadow: none;
     color-scheme: dark;
   }
@@ -75,7 +77,7 @@
   --accent-hover: #86a9ff;
   --accent-soft: #1f2a44;
   --on-accent: #0d1424;
-  --mine: #3fbf86;
+  --mine: #3c8f69;
   --cell: #262624;
   --cell-off: #1a1a19;
   --ok: #5fcf97;
@@ -83,8 +85,9 @@
   --danger: #f07c7c;
   --warn-soft: #3a3020;
   --chosen: #ffa940;
-  --overlap: #3f548c;
-  --buffer: #2a3046;
+  --common: #6f98ff;
+  --buffer-stripe: rgb(111 152 255 / 0.45);
+  --others: #56658f;
   --shadow: none;
   color-scheme: dark;
 }
@@ -818,12 +821,16 @@ label.inline select {
 }
 .swatch-mine {
   background: linear-gradient(to right, var(--cell) 0 3px, var(--mine) 3px 11px, var(--cell) 11px);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
-.swatch-overlap {
-  background: var(--overlap);
+.swatch-common {
+  background: var(--common);
 }
 .swatch-buffer {
-  background: var(--buffer);
+  background: repeating-linear-gradient(-45deg, var(--buffer-stripe) 0 3px, var(--cell) 3px 6px);
+}
+.swatch-others {
+  background: linear-gradient(to right, color-mix(in oklab, var(--others) 20%, var(--cell)), color-mix(in oklab, var(--others) 60%, var(--cell)));
 }
 
 .readout {
@@ -917,21 +924,25 @@ label.inline select {
 .cell.off {
   background: repeating-linear-gradient(-45deg, var(--cell-off) 0 3px, transparent 3px 7px);
 }
-.cell.buffer {
-  background: var(--buffer);
+/* Other people's times: a quiet tint, stronger as more of them are free. */
+.cell.tint {
+  background-color: color-mix(in oklab, var(--others) var(--o), var(--cell));
 }
-.cell.overlap {
-  background: var(--overlap);
-}
-.cell.buffer,
-.cell.overlap {
+/* Times everyone can make: the one thing that should jump out. */
+.cell.common {
+  background: var(--common);
   border-top-color: transparent;
 }
-.cell.buffer.hour,
-.cell.overlap.hour {
-  border-top-color: color-mix(in srgb, var(--surface) 55%, transparent);
+.cell.common.hour {
+  border-top-color: color-mix(in srgb, var(--surface) 35%, transparent);
 }
-/* Your selection is an inset bar so the shading behind it stays visible at the edges. */
+.cell.buffer {
+  background-image: repeating-linear-gradient(-45deg, var(--buffer-stripe) 0 3px, transparent 3px 7px);
+}
+.cell.common.on::before {
+  display: none;
+}
+/* Your own times: a muted inset bar, hidden inside the overlap where you're already counted. */
 .cell.on::before {
   content: "";
   position: absolute;

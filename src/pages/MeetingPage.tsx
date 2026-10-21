@@ -8,13 +8,14 @@ import {
   buildGrid,
   icsFor,
   NIGHT_END,
-  othersOverlap,
+  commonOverlap,
+  othersTint,
   slotCount,
   slotMs,
   slotStart,
   suggest,
   zonedSlots,
-  type Shade,
+  type Overlap,
   type Suggestion,
 } from "../schedule";
 import { getLastMe, getPref, rememberSession, setPref } from "../storage";
@@ -118,8 +119,12 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
 
   const bufferOptions = [0, 15, 30, 45, 60].filter((m) => m % meeting.slotMinutes === 0);
   const buffer = bufferOptions.includes(bufferPref) ? bufferPref : (bufferOptions.find((m) => m >= bufferPref) ?? 0);
-  const others = respondents.filter((p) => p.id !== me?.id);
-  const shade = othersOverlap(meeting, others, availability, buffer);
+  const overlap = commonOverlap(meeting, respondents, availability, buffer);
+  const tint = othersTint(
+    meeting,
+    respondents.filter((p) => p.id !== me?.id),
+    availability,
+  );
 
   const lengthOptions = [15, 30, 45, 60, 90, 120, 180].filter((m) => m % meeting.slotMinutes === 0);
   const length = lengthOptions.includes(lengthMin) ? lengthMin : (lengthOptions.find((m) => m >= lengthMin) ?? meeting.slotMinutes);
@@ -256,17 +261,17 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
             meeting={meeting}
             slot={hover}
             tz={tz}
-            shade={shade}
+            overlap={overlap}
             respondents={respondents}
             availability={availability}
             me={me}
           />
           <div className="legend">
             <span className="swatch-item">
-              <span className="swatch swatch-mine" /> You're free
-            </span>
-            <span className="swatch-item">
-              <span className="swatch swatch-overlap" /> {shade.together === shade.others.length ? "Works for everyone else" : `Best overlap (${shade.together} of ${shade.others.length})`}
+              <span className="swatch swatch-common" />{" "}
+              {overlap.together === overlap.people.length
+                ? "Everyone's free"
+                : `Best overlap (${overlap.together} of ${overlap.people.length})`}
             </span>
             <label className="swatch-item">
               <span className="swatch swatch-buffer" /> Buffer
@@ -285,6 +290,12 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
                 ))}
               </select>
             </label>
+            <span className="swatch-item">
+              <span className="swatch swatch-mine" /> You
+            </span>
+            <span className="swatch-item">
+              <span className="swatch swatch-others" /> Others (darker = more people)
+            </span>
           </div>
           {me && mine ? (
             <>
@@ -292,7 +303,8 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
                 model={grid}
                 selected={mine}
                 onChange={editMine}
-                shade={shade.levels}
+                overlap={overlap.levels}
+                tint={tint}
                 chosen={chosenSlots}
                 onHover={setHover}
               />
@@ -367,22 +379,25 @@ function SaveStatus({ state }: { state: SaveState }) {
   return <span className={`save save-${state}`}>{text}</span>;
 }
 
-const names = (people: Participant[]) =>
-  people.length <= 1
-    ? (people[0]?.initials ?? "")
-    : `${people.slice(0, -1).map((p) => p.initials).join(", ")} and ${people[people.length - 1].initials}`;
+/** "you, AB and CD", with the viewer first. */
+const names = (people: Participant[], me: Participant | null) => {
+  const list = [...people]
+    .sort((x, y) => Number(y.id === me?.id) - Number(x.id === me?.id))
+    .map((p) => (p.id === me?.id ? "you" : p.initials));
+  return list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+};
 
 /** Who's free under the pointer, or what the shading means when nothing is hovered. */
 function Readout(props: {
   meeting: Meeting;
   slot: number | null;
   tz: string;
-  shade: Shade;
+  overlap: Overlap;
   respondents: Participant[];
   availability: Record<string, number[]>;
   me: Participant | null;
 }) {
-  const { meeting, slot, tz, shade, respondents, availability, me } = props;
+  const { meeting, slot, tz, overlap, respondents, availability, me } = props;
   if (slot !== null) {
     const start = slotStart(meeting, slot);
     const free = respondents.filter((p) => availability[p.id].includes(slot));
@@ -399,23 +414,22 @@ function Readout(props: {
     );
   }
 
-  const { others, together } = shade;
+  const { people, together } = overlap;
+  const meAnswered = !!me && people.some((p) => p.id === me.id);
   let text: string;
-  if (others.length === 0) {
-    text = me
-      ? "You're the first to fill this in. Shading appears here as teammates add their times."
-      : "Join to add your times.";
-  } else if (together === others.length) {
-    text =
-      others.length === 1
-        ? `Shaded: when ${names(others)} is free. Paint over it if you can make it.`
-        : `Shaded: when ${names(others)} are all free. Paint over it if you can make it.`;
-  } else if (others.length === 1) {
-    text = `${names(others)} isn't free at any of these times.`;
+  if (people.length === 0) {
+    text = "Nobody has answered yet. Paint your times to get started.";
+  } else if (people.length === 1) {
+    text = meAnswered
+      ? "Only you so far. Shared times light up here once others add theirs."
+      : `${people[0].initials} has answered. Paint your times to see where you overlap.`;
+  } else if (together === people.length) {
+    text = `Highlighted: when ${names(people, me)} are all free.`;
+    if (!meAnswered) text += " Paint your times to see if you fit.";
   } else if (together >= 2) {
-    text = `No time works for all of ${names(others)} yet. Shaded where ${together} of them overlap.`;
+    text = `No time works for all ${people.length} yet. Highlighted where ${together} of you overlap.`;
   } else {
-    text = `${names(others)} don't overlap anywhere yet. Mark everything you can do.`;
+    text = "Nobody's times overlap yet.";
   }
   return (
     <div className="readout">

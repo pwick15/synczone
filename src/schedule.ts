@@ -46,38 +46,38 @@ export function buildGrid(slots: ZonedSlot[], hideNight: boolean): GridModel {
   };
 }
 
-/** Per-slot background for the grid: 0 nothing, 1 buffer around the overlap, 2 the overlap itself. */
-export type ShadeLevels = Uint8Array;
+/** Per-slot highlight for the grid: 0 nothing, 1 buffer around the overlap, 2 the overlap itself. */
+export type OverlapLevels = Uint8Array;
 
-export interface Shade {
-  levels: ShadeLevels;
-  /** Everyone except the viewer who has answered. */
-  others: Participant[];
-  /** How many of `others` are free in the shaded overlap. Equals others.length for a true intersection. */
+export interface Overlap {
+  levels: OverlapLevels;
+  /** Everyone who has answered, including the viewer once they have. */
+  people: Participant[];
+  /** How many of `people` are free in the highlighted overlap. Equals people.length for a true intersection. */
   together: number;
 }
 
 /**
- * Where the people other than the viewer overlap, padded by `bufferMinutes` on each side.
- * Uses the strict intersection when there is one; otherwise falls back to the slots where the
- * most of them overlap (at least two), so the viewer still gets a target to aim for.
+ * Where everyone who has answered is free at once, padded by `bufferMinutes` on each side.
+ * With no time that works for all of them, falls back to the slots where the most of them
+ * overlap (at least two). A single person on their own is never an overlap.
  */
-export function othersOverlap(
+export function commonOverlap(
   meeting: Meeting,
-  others: Participant[],
+  people: Participant[],
   availability: Record<string, number[]>,
   bufferMinutes: number,
-): Shade {
+): Overlap {
   const n = slotCount(meeting);
   const levels = new Uint8Array(n);
-  if (!others.length) return { levels, others, together: 0 };
+  if (people.length < 2) return { levels, people, together: people.length };
 
   const counts = new Uint16Array(n);
-  for (const p of others) for (const i of availability[p.id] ?? []) if (i < n) counts[i]++;
-  let together = others.length;
+  for (const p of people) for (const i of availability[p.id] ?? []) if (i < n) counts[i]++;
+  let together = people.length;
   if (!counts.includes(together)) {
     together = Math.max(0, ...counts);
-    if (together < 2) return { levels, others, together };
+    if (together < 2) return { levels, people, together };
   }
 
   for (let i = 0; i < n; i++) if (counts[i] === together) levels[i] = 2;
@@ -88,7 +88,18 @@ export function othersOverlap(
       for (let j = Math.max(0, i - pad); j <= Math.min(n - 1, i + pad); j++) if (!levels[j]) levels[j] = 1;
     }
   }
-  return { levels, others, together };
+  return { levels, people, together };
+}
+
+/** Per-slot tint strength (0–100) for how many of `others` are free, so individual times stay visible but quiet. */
+export function othersTint(meeting: Meeting, others: Participant[], availability: Record<string, number[]>): Uint8Array {
+  const n = slotCount(meeting);
+  const tint = new Uint8Array(n);
+  if (!others.length) return tint;
+  const counts = new Uint16Array(n);
+  for (const p of others) for (const i of availability[p.id] ?? []) if (i < n) counts[i]++;
+  for (let i = 0; i < n; i++) if (counts[i]) tint[i] = Math.round(18 + (counts[i] / others.length) * 42);
+  return tint;
 }
 
 export interface Suggestion {
