@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { MeetingSummary, Participant } from "../../shared/types";
 import { MAX_DAYS, SLOT_OPTIONS } from "../../shared/types";
 import { api, ApiError } from "../api";
 import { PersonPicker, TeamList, WhoAmI } from "../components/People";
 import { Link, navigate } from "../router";
+import { meetingStatus, type MeetingStatus } from "../schedule";
 import { forgetSession, getLastMe, rememberSession } from "../storage";
 import { useMe } from "../useMe";
 import { usePoll } from "../usePoll";
@@ -66,6 +67,7 @@ export function SessionPage({ sid }: { sid: string }) {
               sid={sid}
               meetings={data.meetings}
               total={data.participants.length}
+              me={me}
               tz={me?.tz ?? browserTz()}
               onDeleted={refresh}
             />
@@ -101,16 +103,20 @@ export function SessionPage({ sid }: { sid: string }) {
   );
 }
 
+const STATUS_ORDER: Record<MeetingStatus, number> = { open: 0, locked: 1, ended: 2 };
+
 function MeetingList({
   sid,
   meetings,
   total,
+  me,
   tz,
   onDeleted,
 }: {
   sid: string;
   meetings: MeetingSummary[];
   total: number;
+  me: Participant | null;
   tz: string;
   onDeleted: () => void;
 }) {
@@ -123,29 +129,61 @@ function MeetingList({
     }
     onDeleted();
   };
-  return (
-    <ul className="meetings">
-      {meetings.map((m) => (
-        <li key={m.id}>
-          <Link href={`/s/${sid}/m/${m.id}`} className="meeting-row">
-            <span className="meeting-title">{m.title}</span>
+  const now = Date.now();
+  const rows = meetings
+    .map((m) => ({ m, status: meetingStatus(m, now) }))
+    .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+  const current = rows.filter((r) => r.status !== "ended");
+  const past = rows.filter((r) => r.status === "ended");
+
+  const row = ({ m, status }: { m: MeetingSummary; status: MeetingStatus }) => {
+    let badge: ReactNode;
+    if (m.chosenStart && m.chosenEnd) {
+      badge = <span className={`badge${status === "locked" ? " ok" : ""}`}>{fmtRange(m.chosenStart, m.chosenEnd, tz)}</span>;
+    } else if (status === "ended") {
+      badge = <span className="badge">No time picked</span>;
+    } else if (me && !m.respondents.includes(me.id)) {
+      badge = <span className="badge todo">Waiting on you</span>;
+    } else {
+      badge = (
+        <span className="badge">
+          {m.respondents.length}/{total} responded
+        </span>
+      );
+    }
+    return (
+      <li key={m.id}>
+        <Link href={`/s/${sid}/m/${m.id}`} className="meeting-row">
+          <span className="meeting-title">{m.title}</span>
+          <span className="meeting-meta">
+            <StatusPill status={status} />
             <span className="muted">
               {fmtDay(m.startUtc, tz)} – {fmtDay(m.endUtc - 1, tz)}
             </span>
-            {m.chosenStart && m.chosenEnd ? (
-              <span className="badge ok">{fmtRange(m.chosenStart, m.chosenEnd, tz)}</span>
-            ) : (
-              <span className="badge">
-                {m.responded}/{total} responded
-              </span>
-            )}
-          </Link>
-          <button className="ghost danger small" onClick={() => remove(m)} aria-label={`Delete ${m.title}`}>
-            Delete
-          </button>
-        </li>
-      ))}
-    </ul>
+          </span>
+          {badge}
+        </Link>
+        <button className="ghost danger small" onClick={() => remove(m)} aria-label={`Delete ${m.title}`}>
+          Delete
+        </button>
+      </li>
+    );
+  };
+
+  return (
+    <>
+      {current.length > 0 ? (
+        <ul className="meetings">{current.map(row)}</ul>
+      ) : (
+        <p className="muted">No open meetings. Create one below to find a new time.</p>
+      )}
+      {past.length > 0 && (
+        <>
+          <h3 className="eyebrow past-head">Past</h3>
+          <ul className="meetings past">{past.map(row)}</ul>
+        </>
+      )}
+    </>
   );
 }
 
@@ -322,6 +360,12 @@ export function CopyLink({ path }: { path?: string }) {
     </button>
   );
 }
+
+const STATUS_LABEL: Record<MeetingStatus, string> = { open: "Open", locked: "Locked in", ended: "Ended" };
+
+export const StatusPill = ({ status }: { status: MeetingStatus }) => (
+  <span className={`status status-${status}`}>{STATUS_LABEL[status]}</span>
+);
 
 export const Loading = () => <p className="muted">Loading…</p>;
 

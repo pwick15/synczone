@@ -476,6 +476,67 @@ label.inline select {
   grid-column: 2;
   align-self: center;
 }
+@media (max-width: 520px) {
+  .meeting-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .meeting-row .badge {
+    grid-row: auto;
+    grid-column: 1;
+    justify-self: start;
+    margin-top: 6px;
+  }
+}
+.meeting-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.past-head {
+  margin: 20px 0 8px;
+}
+.meetings.past .meeting-row {
+  background: var(--surface-2);
+}
+.meetings.past .meeting-title {
+  color: var(--muted);
+}
+
+/* Where a meeting stands: open for answers, locked in, or over. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.status-open {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.status-locked {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.status-ended {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.status-ended::before {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
 
 .badge {
   display: inline-block;
@@ -490,6 +551,10 @@ label.inline select {
 .badge.ok {
   background: var(--ok-soft);
   color: var(--ok);
+}
+.badge.todo {
+  background: var(--warn-soft);
+  color: color-mix(in srgb, var(--chosen) 75%, var(--text));
 }
 
 .new-meeting-form {
@@ -591,6 +656,9 @@ label.inline select {
   font-size: 0.85rem;
 }
 .waiting .muted {
+  margin-right: 4px;
+}
+.waiting-you {
   margin-right: 4px;
 }
 
@@ -979,6 +1047,10 @@ label.inline select {
 }
 .cell:not(.off):hover {
   filter: brightness(0.93);
+}
+/* Times that have already started stay readable but recede. */
+.cell.past {
+  opacity: 0.4;
 }
 
 /* Best times */

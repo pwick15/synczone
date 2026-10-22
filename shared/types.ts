@@ -27,7 +27,8 @@ export interface Meeting {
 }
 
 export interface MeetingSummary extends Meeting {
-  responded: number;
+  /** Ids of everyone who has saved availability, including an empty "none of these work". */
+  respondents: string[];
 }
 
 export interface SessionPayload {

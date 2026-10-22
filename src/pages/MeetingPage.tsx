@@ -9,6 +9,8 @@ import {
   icsFor,
   NIGHT_END,
   commonOverlap,
+  firstUpcomingSlot,
+  meetingStatus,
   slotCount,
   slotMs,
   slotStart,
@@ -21,7 +23,7 @@ import { getLastMe, getPref, rememberSession, setPref } from "../storage";
 import { browserTz, fmtDay, fmtDuration, fmtRange, fmtTime, tzCity, tzOffset, zoned } from "../time";
 import { useMe } from "../useMe";
 import { usePoll } from "../usePoll";
-import { CopyLink, Loading, NotFound } from "./SessionPage";
+import { CopyLink, Loading, NotFound, StatusPill } from "./SessionPage";
 
 type SaveState = "idle" | "pending" | "saving" | "saved" | "error";
 
@@ -116,6 +118,9 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
   const waiting = participants.filter((p) => !(p.id in availability));
 
   const n = slotCount(meeting);
+  const now = Date.now();
+  const status = meetingStatus(meeting, now);
+  const upcoming = firstUpcomingSlot(meeting, now);
 
   const bufferOptions = [0, 15, 30, 45, 60].filter((m) => m % meeting.slotMinutes === 0);
   const buffer = bufferOptions.includes(bufferPref) ? bufferPref : (bufferOptions.find((m) => m >= bufferPref) ?? 0);
@@ -134,8 +139,11 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
   const lengthOptions = [15, 30, 45, 60, 90, 120, 180].filter((m) => m % meeting.slotMinutes === 0);
   const length = lengthOptions.includes(lengthMin) ? lengthMin : (lengthOptions.find((m) => m >= lengthMin) ?? meeting.slotMinutes);
   const lengthSlots = length / meeting.slotMinutes;
-  // One person on their own isn't a match, so only offer times at least two people share.
-  const suggestions = suggest(meeting, respondents, availability, lengthSlots).filter((s) => s.free.length >= 2);
+  // Only offer start times still ahead, and only ones at least two people share.
+  const ahead = upcoming
+    ? Object.fromEntries(Object.entries(availability).map(([id, slots]) => [id, slots.filter((i) => i >= upcoming)]))
+    : availability;
+  const suggestions = suggest(meeting, respondents, ahead, lengthSlots).filter((s) => s.free.length >= 2);
 
   const chosenSlots: [number, number] | null =
     meeting.chosenStart && meeting.chosenEnd
@@ -207,16 +215,22 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
             <Link href={`/s/${sid}`}>← {payload.session.name}</Link>
           </p>
           <h1>{meeting.title}</h1>
-          <p className="muted">
-            {fmtDay(meeting.startUtc, tz)} – {fmtDay(meeting.endUtc - 1, tz)} · {meeting.slotMinutes}-minute blocks ·{" "}
-            {respondents.length} of {participants.length} responded
+          <p className="meeting-meta">
+            <StatusPill status={status} />
+            <span className="muted">
+              {fmtDay(meeting.startUtc, tz)} – {fmtDay(meeting.endUtc - 1, tz)} · {meeting.slotMinutes}-minute blocks ·{" "}
+              {respondents.length} of {participants.length} responded
+            </span>
           </p>
-          {waiting.length > 0 && (
+          {status !== "ended" && waiting.length > 0 && (
             <p className="waiting">
               <span className="muted">Waiting on</span>
-              {waiting.map((p) => (
-                <Avatar key={p.id} p={p} size="sm" dim />
-              ))}
+              {waiting.some((p) => p.id === me?.id) && <strong className="waiting-you">you</strong>}
+              {waiting
+                .filter((p) => p.id !== me?.id)
+                .map((p) => (
+                  <Avatar key={p.id} p={p} size="sm" dim />
+                ))}
             </p>
           )}
         </div>
@@ -229,7 +243,17 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
         </div>
       </header>
 
-      {chosenSlots && <ChosenBanner meeting={meeting} zones={zones} participants={participants} onUnlock={unlock} />}
+      {chosenSlots && (
+        <ChosenBanner meeting={meeting} ended={status === "ended"} zones={zones} participants={participants} onUnlock={unlock} />
+      )}
+      {status === "ended" && !chosenSlots && (
+        <p className="notice">
+          <span>
+            These dates have passed and no time was locked in. To find a new time,{" "}
+            <Link href={`/s/${sid}`}>create a new meeting</Link> in {payload.session.name}.
+          </span>
+        </p>
+      )}
 
       <div className="toolbar">
         <label className="inline">
@@ -317,6 +341,7 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
                 overlap={overlap.levels}
                 lanes={lanes}
                 chosen={chosenSlots}
+                pastBefore={upcoming}
                 onHover={setHover}
               />
               {mine.size === 0 && !(me.id in payload.availability) && (
@@ -344,10 +369,14 @@ export function MeetingPage({ sid, mid }: { sid: string; mid: string }) {
               </select>
             </label>
           </div>
-          {respondents.length < 2 ? (
+          {upcoming === n ? (
+            <p className="muted">All of these times have passed.</p>
+          ) : respondents.length < 2 ? (
             <p className="muted">Suggestions appear once two people have marked their availability.</p>
           ) : suggestions.length === 0 ? (
-            <p className="muted">No {fmtDuration(length)} stretch works for two or more people yet. Try a shorter meeting.</p>
+            <p className="muted">
+              No upcoming {fmtDuration(length)} stretch works for two or more people yet. Try a shorter meeting.
+            </p>
           ) : (
             <ol className="suggestions">
               {suggestions.map((s) => (
@@ -626,7 +655,10 @@ function LockDialog(props: {
         </div>
         <ZoneLines start={start} end={end} zones={zones} participants={participants} skip={tz} />
 
-        <p className="muted small">Locking it in shows this time to everyone in the session.</p>
+        <p className="muted small">
+          Locking it in marks the meeting as decided and shows this time to everyone in the session. You can unlock it
+          later.
+        </p>
         <div className="row lock-actions">
           <button
             className="primary"
@@ -656,11 +688,13 @@ function LockDialog(props: {
 
 function ChosenBanner({
   meeting,
+  ended,
   zones,
   participants,
   onUnlock,
 }: {
   meeting: Meeting;
+  ended: boolean;
   zones: string[];
   participants: Participant[];
   onUnlock: () => void;
@@ -669,7 +703,7 @@ function ChosenBanner({
   return (
     <section className="chosen">
       <div>
-        <p className="eyebrow">Locked in</p>
+        <p className="eyebrow">{ended ? "Locked in · this time has passed" : "Locked in"}</p>
         <ZoneLines start={meeting.chosenStart!} end={meeting.chosenEnd!} zones={zones} participants={participants} />
       </div>
       <div className="row">

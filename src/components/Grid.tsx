@@ -27,6 +27,8 @@ interface Props {
   lanes: Lane[];
   /** Slot range [start, end) to outline as the locked-in time. */
   chosen: [number, number] | null;
+  /** Slots before this index have already started, and are drawn faded. */
+  pastBefore: number;
   /** The slot under the pointer (or last touched), for the who's-free readout. */
   onHover: (slot: number | null) => void;
 }
@@ -54,7 +56,7 @@ const inRect = (r: Rect | null, di: number, ri: number) =>
 
 const OVERLAP_CLASS = ["", " buffer", " common"];
 
-export function Grid({ model, selected, onChange, overlap, lanes, chosen, onHover }: Props) {
+export function Grid({ model, selected, onChange, overlap, lanes, chosen, pastBefore, onHover }: Props) {
   const drag = useRef<{ anchor: number[]; adding: boolean } | null>(null);
   const [preview, setPreview] = useState<{ rect: Rect; adding: boolean } | null>(null);
 
@@ -151,6 +153,7 @@ export function Grid({ model, selected, onChange, overlap, lanes, chosen, onHove
               if (painting) cls += preview!.adding ? " paint-add" : " paint-remove";
               if (chosen && slot >= chosen[0] && slot < chosen[1]) cls += " locked";
               if (minute % 60 === 0) cls += " hour";
+              if (slot < pastBefore) cls += " past";
               const image = laneImage((lane) => (lane.isMe ? on : !!lane.free[slot]));
               return (
                 <div key={d} className={cls} data-di={di} data-ri={ri}>

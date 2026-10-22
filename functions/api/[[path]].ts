@@ -146,7 +146,7 @@ async function route(ctx: Ctx): Promise<Response> {
         .bind(sid),
       db
         .prepare(
-          `SELECT m.*, (SELECT COUNT(*) FROM availability a WHERE a.meeting_id = m.id) AS responded
+          `SELECT m.*, (SELECT json_group_array(a.participant_id) FROM availability a WHERE a.meeting_id = m.id) AS respondents
            FROM meetings m WHERE m.session_id = ? ORDER BY m.start_utc DESC, m.created_at DESC`,
         )
         .bind(sid),
@@ -154,8 +154,8 @@ async function route(ctx: Ctx): Promise<Response> {
     const payload: SessionPayload = {
       session,
       participants: participants.results as unknown as Participant[],
-      meetings: (meetings.results as unknown as (MeetingRow & { responded: number })[]).map(
-        (r): MeetingSummary => ({ ...toMeeting(r), responded: r.responded }),
+      meetings: (meetings.results as unknown as (MeetingRow & { respondents: string })[]).map(
+        (r): MeetingSummary => ({ ...toMeeting(r), respondents: JSON.parse(r.respondents) }),
       ),
     };
     return json(payload);

@@ -5,6 +5,22 @@ export const slotMs = (m: Meeting) => m.slotMinutes * 60_000;
 export const slotCount = (m: Meeting) => Math.round((m.endUtc - m.startUtc) / slotMs(m));
 export const slotStart = (m: Meeting, i: number) => m.startUtc + i * slotMs(m);
 
+export type MeetingStatus = "open" | "locked" | "ended";
+
+/**
+ * Open while people can still pick a time, locked once someone locks one in, and ended
+ * once that time has passed (or, with nothing locked in, once the whole window has).
+ * Every bound is a UTC instant, so everyone sees the same status whatever their zone.
+ */
+export function meetingStatus(m: Meeting, now = Date.now()): MeetingStatus {
+  if (m.chosenStart && m.chosenEnd) return now < m.chosenEnd ? "locked" : "ended";
+  return now < m.endUtc ? "open" : "ended";
+}
+
+/** The first slot that hasn't started yet, or slotCount once the whole window is past. */
+export const firstUpcomingSlot = (m: Meeting, now = Date.now()) =>
+  Math.min(slotCount(m), Math.max(0, Math.ceil((now - m.startUtc) / slotMs(m))));
+
 export interface GridModel {
   /** Column keys, "YYYY-MM-DD" in the viewing zone. */
   dates: string[];
